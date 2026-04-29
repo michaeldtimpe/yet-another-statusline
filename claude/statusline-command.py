@@ -251,11 +251,6 @@ class SessionInfo:
         log = self.token_log
         return (log.day_in * rate_in + log.day_out * rate_out) / 1_000_000
 
-    @property
-    def helper(self) -> str:
-        return Renderer().helper(self.rate_limits.five_hour)
-
-
 @dataclass
 class TokenLog:
     day_in: int = 0
@@ -450,7 +445,7 @@ class Renderer:
             f' {self.SESSION}[{session_id}]{self.R}'
         )
 
-    def model_section(self, model_name: str, skills_count: int, skills_names: str, ctx_used_pct: float | None, plugin_names: str, helper: str) -> str:
+    def model_section(self, model_name: str, skills_count: int, skills_names: str, ctx_used_pct: float | None, plugin_names: str, five_hour_limit: str) -> str:
         line = f'{self.MODEL}󰢹  {model_name}{self.R}'
         if skills_count > 0:
             line += f' {self.LABEL}|{self.R} [{self.SKILLS}{skills_names}{self.R}]'
@@ -460,11 +455,10 @@ class Renderer:
                 line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R}'
             except (TypeError, ValueError):
                 pass
-        if plugin_names:
-            line += f' {self.LABEL}|{self.R} {self.SKILLS}{plugin_names}{self.R}'
-        if helper:
-            line += f' |\033[35;5;15\033[1m   {helper}'
-        return line
+        return line + (
+            f' {self.LABEL}|{self.R} {self.SKILLS}{plugin_names}{self.R}'
+            f' |{self.R} \033[38;5;15m\033[1m  {self.helper(five_hour_limit)}{self.R}'
+        )
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float) -> str:
         return (
@@ -472,8 +466,8 @@ class Renderer:
             f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
             f' / {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
             f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
-            f' | 💰 {self.COST}${sess_cost:.4f}{self.R}'
-            f'{self.LABEL}/{self.R}{self.COST}${day_cost:.4f}{self.R}'
+            f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
+            f'{self.LABEL}/{self.R}{self.COST}${day_cost:,.2f}{self.R}'
         )
 
     def openspec_bar(self, name: str, done: int, total: int, width: int = 30) -> str:
@@ -491,17 +485,17 @@ class Renderer:
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}{delta}'
-        except Exception:
-            return ''
+        except Exception as e:
+            return f'{e.__class__.__name__}, {str(e)}'
 
 def main() -> None:
-    session = SessionInfo.from_dict(json.loads(sys.stdin.read()))
-
+    info = json.loads(sys.stdin.read())
+    session = SessionInfo.from_dict(info)
     r = Renderer()
 
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
-        r.model_section(session.model_name, 0, '', session.context_window.used_percentage, session.workspace.plugins, r.helper(session.rate_limits.five_hour)),
+        r.model_section(session.model_name, 0, '', session.context_window.used_percentage, session.workspace.plugins, session.rate_limits.five_hour),
         r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
