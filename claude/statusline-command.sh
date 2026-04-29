@@ -366,7 +366,7 @@ done
 
 # ── Assemble ──────────────────────────────────────────────────────────────────
 out="${line1}
-${line2}
+${line2} | $(echo "$input" | python3 "$HOME/.claude/statusline-helper.py")
 ${line3}"
 
 [[ -n "$openspec_lines" ]] && out+="${openspec_lines}"
