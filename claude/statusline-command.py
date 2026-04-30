@@ -476,7 +476,7 @@ class Renderer:
                 ctx_fmt = f'{float(ctx.used_percentage):.0f}'
                 u = ctx.current_usage
                 ctx_tok = u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
-                line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.R}{self.TOK}{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
+                line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
             except (TypeError, ValueError):
                 pass
         return line + (
