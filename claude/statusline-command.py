@@ -43,6 +43,22 @@ class OutputStyle(NamedTuple):
         return cls(name=d.get('name', 'default'))
 
 
+class Effort(NamedTuple):
+    level: str = ''
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'Effort':
+        return cls(level=d.get('level', ''))
+
+
+class Thinking(NamedTuple):
+    enabled: bool = False
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'Thinking':
+        return cls(enabled=bool(d.get('enabled', False)))
+
+
 class CurrentUsage(NamedTuple):
     input_tokens: int = 0
     output_tokens: int = 0
@@ -171,6 +187,8 @@ class SessionInfo:
     cost: Cost = field(default_factory=Cost)
     context_window: ContextWindow = field(default_factory=ContextWindow)
     exceeds_200k_tokens: bool = False
+    effort: Effort = field(default_factory=Effort)
+    thinking: Thinking = field(default_factory=Thinking)
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
@@ -186,6 +204,8 @@ class SessionInfo:
             cost=Cost.from_dict(d.get('cost') or {}),
             context_window=ContextWindow.from_dict(d.get('context_window') or {}),
             exceeds_200k_tokens=d.get('exceeds_200k_tokens', False),
+            effort=Effort.from_dict(d.get('effort') or {}),
+            thinking=Thinking.from_dict(d.get('thinking') or {}),
             rate_limits=RateLimits.from_dict(d.get('rate_limits') or {}),
         )
 
@@ -231,6 +251,12 @@ class SessionInfo:
     @property
     def model_name(self) -> str:
         return self.model.display_name or self.model.id or 'unknown'
+
+    @property
+    def model_thinking(self) -> str:
+        if self.thinking.enabled and self.effort.level:
+            return self.effort.level
+        return ''
 
     @property
     def plugin_names(self) -> str:
@@ -468,8 +494,8 @@ class Renderer:
             f' {self.SESSION}[{session_id}]{self.R}'
         )
 
-    def model_section(self, model_name: str, skills_count: int, skills_names: str, ctx: ContextWindow, plugin_names: str, five_hour_limit: str) -> str:
-        line = f'{self.MODEL}󰢹  {model_name}{self.R}'
+    def model_section(self, model_name: str, model_thinking: str, skills_count: int, skills_names: str, ctx: ContextWindow, plugin_names: str, five_hour_limit: str) -> str:
+        line = f'{self.MODEL}󰢹  {model_name}{self.R} \033[0m\033[1;37m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
         if skills_count > 0:
             line += f' {self.LABEL}|{self.R} [{self.SKILLS}{skills_names}{self.R}]'
         if ctx.used_percentage is not None and ctx.used_percentage != '':
@@ -520,7 +546,7 @@ def main() -> None:
 
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
-        r.model_section(session.model_name, 0, '', session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
+        r.model_section(session.model_name, session.model_thinking, 0, '', session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
         r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
