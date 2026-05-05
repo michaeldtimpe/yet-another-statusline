@@ -268,6 +268,10 @@ class SessionInfo:
         return TokenLog.update(self.session_id, today, self.total_in, self.total_out)
 
     @property
+    def token_rate(self) -> int:
+        return TokenRate.update(self.session_id, self.total_in, self.total_out)
+
+    @property
     def session_cost(self) -> float:
         rate_in, rate_out = self.model.cost_rates
         return (self.total_in * rate_in + self.total_out * rate_out) / 1_000_000
@@ -308,6 +312,46 @@ class TokenLog:
             except ValueError:
                 pass
         return cls(day_in=day_in, day_out=day_out)
+
+
+class TokenRate:
+    WINDOW = 60.0
+    KEEP = 180.0
+
+    @classmethod
+    def update(cls, session_id: str, total_in: int, total_out: int) -> int:
+        if not session_id:
+            return 0
+        log = HOME / '.claude' / 'statusline-token-rate.log'
+        now = time.time()
+        rows: list[tuple[float, str, int, int]] = []
+        if log.exists():
+            for ln in log.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    ts = float(parts[0])
+                    ti = int(parts[2])
+                    to = int(parts[3])
+                except ValueError:
+                    continue
+                if now - ts > cls.KEEP:
+                    continue
+                rows.append((ts, parts[1], ti, to))
+        rows.append((now, session_id, total_in, total_out))
+        try:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text('\n'.join(f'{ts:.3f} {sid} {ti} {to}' for ts, sid, ti, to in rows) + '\n')
+        except OSError:
+            pass
+        samples = [(ts, ti, to) for ts, sid, ti, to in rows if sid == session_id and now - ts <= cls.WINDOW]
+        if len(samples) < 2:
+            return 0
+        samples.sort()
+        _, ti0, to0 = samples[0]
+        _, ti1, to1 = samples[-1]
+        return max(0, (ti1 + to1) - (ti0 + to0))
 
 
 @dataclass
@@ -549,19 +593,20 @@ class Renderer:
 
         extras = []
         if skills_count > 0:
-            extras.append(f'{c_skills}\033[1m󰟟 {self.R}{self.SKILLS}{skills_names}{self.R}')
+            extras.append(f'{c_skills}\033[1m󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
-            extras.append(f'{c_plugins}\033[1m {self.R}{self.SKILLS}{plugin_names}{self.R}')
+            extras.append(f'{c_plugins}\033[1m  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         if extras:
             line += '\n' + f' {self.LABEL}|{self.R} '.join(extras)
         return line
 
-    def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float) -> str:
+    def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         return (
-            f'{self.R}\033[38;5;11m󱢧 {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
+            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
             f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
             f' / {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
             f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
+            f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
             f'{self.LABEL}/{self.R}{self.COST}${day_cost:,.2f}{self.R}'
         )
@@ -580,7 +625,7 @@ class Renderer:
         try:
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
-            return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}{delta}'
+            return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}T-{delta}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
 
@@ -594,7 +639,7 @@ def main() -> None:
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
         r.model_section(session.model_name, session.model_thinking, len(skills.names), skill_display, session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
-        r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost)
+        r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
         out += '\n' + r.openspec_bar(name, d, t)
