@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 '''Claude Code statusLine command (Python port).'''
 
+from __future__ import annotations
 import json
 import os
 import re
