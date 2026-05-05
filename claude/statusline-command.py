@@ -399,6 +399,33 @@ class GitInfo:
 
 
 @dataclass
+class LoadedSkills:
+    names: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_transcript(cls, transcript_path: str) -> 'LoadedSkills':
+        if not transcript_path:
+            return cls()
+        p = Path(transcript_path)
+        if not p.is_file():
+            return cls()
+        pat = re.compile(r'"name"\s*:\s*"Skill"[^}]*?"skill"\s*:\s*"([^"]+)"')
+        seen: dict[str, None] = {}
+        try:
+            with p.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if '"Skill"' not in ln:
+                        continue
+                    for m in pat.finditer(ln):
+                        name = m.group(1)
+                        if name not in seen:
+                            seen[name] = None
+        except OSError:
+            return cls()
+        return cls(names=list(seen.keys()))
+
+
+@dataclass
 class OpenSpec:
     changes: list[tuple[str, int, int]] = field(default_factory=list)
 
@@ -450,19 +477,28 @@ RAINBOW_PALETTE = (
 )
 
 
-def rainbow_color() -> str:
+def rainbow_step(advance: bool = True) -> int:
     state = HOME / '.claude' / 'statusline-rainbow'
     try:
         n = int(state.read_text().strip())
     except (OSError, ValueError):
         n = 0
-    color = RAINBOW_PALETTE[n % len(RAINBOW_PALETTE)]
-    try:
-        state.parent.mkdir(parents=True, exist_ok=True)
-        state.write_text(str((n + 1) % len(RAINBOW_PALETTE)))
-    except OSError:
-        pass
+    if advance:
+        try:
+            state.parent.mkdir(parents=True, exist_ok=True)
+            state.write_text(str((n + 1) % len(RAINBOW_PALETTE)))
+        except OSError:
+            pass
+    return n
+
+
+def rainbow_at(step: int, offset: int = 0) -> str:
+    color = RAINBOW_PALETTE[(step + offset) % len(RAINBOW_PALETTE)]
     return f'\033[38;5;{color}m'
+
+
+def rainbow_color() -> str:
+    return rainbow_at(rainbow_step(advance=True))
 
 
 class Renderer:
@@ -495,9 +531,14 @@ class Renderer:
         )
 
     def model_section(self, model_name: str, model_thinking: str, skills_count: int, skills_names: str, ctx: ContextWindow, plugin_names: str, five_hour_limit: str) -> str:
-        line = f'{self.MODEL}󰢹  {model_name}{self.R} \033[0m\033[1;37m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
+        step = rainbow_step(advance=True)
+        c_think = rainbow_at(step, 0)
+        c_skills = rainbow_at(step, 3)
+        c_plugins = rainbow_at(step, 6)
+        c_helper = rainbow_at(step, 9)
+        line = f'{self.MODEL}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
         if skills_count > 0:
-            line += f' {self.LABEL}|{self.R} [{self.SKILLS}{skills_names}{self.R}]'
+            line += f' {self.LABEL}|{self.R} {c_skills}\033[1m󰟟 {self.R}{self.SKILLS}{skills_names}{self.R}'
         if ctx.used_percentage is not None and ctx.used_percentage != '':
             try:
                 ctx_fmt = f'{float(ctx.used_percentage):.0f}'
@@ -506,9 +547,10 @@ class Renderer:
                 line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
             except (TypeError, ValueError):
                 pass
+        plugin_section = f' {self.LABEL}|{self.R} {c_plugins}\033[1m {self.R}{self.SKILLS}{plugin_names}{self.R}' if plugin_names else ''
         return line + (
-            f' {self.LABEL}|{self.R} {self.SKILLS}{plugin_names}{self.R}'
-            f' |{self.R} {rainbow_color()}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
+            f'{plugin_section}'
+            f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
         )
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float) -> str:
@@ -544,9 +586,11 @@ def main() -> None:
     session = SessionInfo.from_dict(info)
     r = Renderer()
 
+    skills = LoadedSkills.from_transcript(session.transcript_path)
+    skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
-        r.model_section(session.model_name, session.model_thinking, 0, '', session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
+        r.model_section(session.model_name, session.model_thinking, len(skills.names), skill_display, session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
         r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
