@@ -537,8 +537,6 @@ class Renderer:
         c_plugins = rainbow_at(step, 6)
         c_helper = rainbow_at(step, 9)
         line = f'{self.MODEL}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
-        if skills_count > 0:
-            line += f' {self.LABEL}|{self.R} {c_skills}\033[1m󰟟 {self.R}{self.SKILLS}{skills_names}{self.R}'
         if ctx.used_percentage is not None and ctx.used_percentage != '':
             try:
                 ctx_fmt = f'{float(ctx.used_percentage):.0f}'
@@ -547,11 +545,16 @@ class Renderer:
                 line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
             except (TypeError, ValueError):
                 pass
-        plugin_section = f' {self.LABEL}|{self.R} {c_plugins}\033[1m {self.R}{self.SKILLS}{plugin_names}{self.R}' if plugin_names else ''
-        return line + (
-            f'{plugin_section}'
-            f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
-        )
+        line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
+
+        extras = []
+        if skills_count > 0:
+            extras.append(f'{c_skills}\033[1m󰟟 {self.R}{self.SKILLS}{skills_names}{self.R}')
+        if plugin_names:
+            extras.append(f'{c_plugins}\033[1m {self.R}{self.SKILLS}{plugin_names}{self.R}')
+        if extras:
+            line += '\n' + f' {self.LABEL}|{self.R} '.join(extras)
+        return line
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float) -> str:
         return (
