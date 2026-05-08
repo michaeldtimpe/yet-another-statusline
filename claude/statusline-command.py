@@ -603,10 +603,10 @@ class Renderer:
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         return (
-            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
-            f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
-            f' / {self.LABEL}{self.BOLDY}↓{self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
-            f'{self.LABEL} {self.BOLDY}↑{self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
+            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
+            f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
+            f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
+            f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
             f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
             f'{self.LABEL}/{self.R}{self.COST}${day_cost:,.2f}{self.R}'
