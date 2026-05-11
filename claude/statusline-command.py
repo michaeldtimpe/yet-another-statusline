@@ -574,11 +574,9 @@ class Renderer:
             f' {self.SESSION}[{session_id}]{self.R}'
         )
 
-    def model_section(self, model_name: str, model_thinking: str, skills_count: int, skills_names: str, ctx: ContextWindow, plugin_names: str, five_hour_limit: str) -> str:
+    def model_section(self, model_name: str, model_thinking: str, ctx: ContextWindow, five_hour_limit: str) -> str:
         step = rainbow_step(advance=True)
         c_think = rainbow_at(step, 0)
-        c_skills = rainbow_at(step, 3)
-        c_plugins = rainbow_at(step, 6)
         c_helper = rainbow_at(step, 9)
         line = f'{self.MODEL}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
         if ctx.used_percentage is not None and ctx.used_percentage != '':
@@ -590,15 +588,18 @@ class Renderer:
             except (TypeError, ValueError):
                 pass
         line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
+        return line
 
+    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
+        step = rainbow_step(advance=False)
+        c_skills = rainbow_at(step, 3)
+        c_plugins = rainbow_at(step, 6)
         extras = []
         if skills_count > 0:
             extras.append(f'{c_skills}\033[1m󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
             extras.append(f'{c_plugins}\033[1m  {self.R}{self.SKILLS}{plugin_names}{self.R}')
-        if extras:
-            line += '\n' + f' {self.LABEL}|{self.R} '.join(extras)
-        return line
+        return f' {self.LABEL}|{self.R} '.join(extras)
 
     def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         return (
@@ -638,11 +639,15 @@ def main() -> None:
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
-        r.model_section(session.model_name, session.model_thinking, len(skills.names), skill_display, session.context_window, session.workspace.plugins, session.rate_limits.five_hour),
+        r.model_section(session.model_name, session.model_thinking, session.context_window, session.rate_limits.five_hour),
         r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
         out += '\n' + r.openspec_bar(name, d, t)
+
+    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+    if plugins_line:
+        out += f'{Renderer.R}\n' + plugins_line
 
     sys.stdout.write(out)
 
