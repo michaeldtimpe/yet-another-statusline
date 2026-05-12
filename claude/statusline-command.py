@@ -585,6 +585,10 @@ class Renderer:
                 u = ctx.current_usage
                 ctx_tok = u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
                 line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
+                if ctx.context_window_size > 0:
+                    total_used = ctx.total_input_tokens + ctx.total_output_tokens
+                    est_remaining = max(0.0, (ctx.context_window_size - total_used) / ctx.context_window_size * 100)
+                    line += f' {self.LABEL}rem:{self.R}{self.CTX}{est_remaining:.2f}%{self.R}'
             except (TypeError, ValueError):
                 pass
         line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
