@@ -582,13 +582,11 @@ class Renderer:
         if ctx.used_percentage is not None and ctx.used_percentage != '':
             try:
                 ctx_fmt = f'{float(ctx.used_percentage):.0f}'
-                u = ctx.current_usage
-                ctx_tok = u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
-                line += f' {self.LABEL}|{self.R} {self.LABEL}{self.BOLDW}  {self.R}{self.CTX}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(ctx_tok)}{self.R}{self.LABEL}){self.R}'
-                if ctx.context_window_size > 0:
-                    total_used = ctx.total_input_tokens + ctx.total_output_tokens
-                    est_remaining = max(0.0, (ctx.context_window_size - total_used) / ctx.context_window_size * 100)
-                    line += f' {self.LABEL}rem:{self.R}{self.CTX}{est_remaining:.2f}%{self.R}'
+                total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
+                fill_ratio = min(total_tokens / 150_000, 1.0)
+                bar_color = self.context_bar_color(fill_ratio)
+                bar = self.context_bar(fill_ratio)
+                line += f' {self.LABEL}|{self.R} {bar} {bar_color}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(total_tokens)}{self.R}{self.LABEL}){self.R}'
             except (TypeError, ValueError):
                 pass
         line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
@@ -615,6 +613,28 @@ class Renderer:
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
             f'{self.LABEL}/{self.R}{self.COST}${day_cost:,.2f}{self.R}'
         )
+
+    def context_bar(self, fill_ratio: float) -> str:
+        ratio = min(max(fill_ratio, 0.0), 1.0)
+        filled = int(ratio * 20)
+        bar_filled = '█' * filled
+        bar_empty = '░' * (20 - filled)
+        if ratio >= 0.9:
+            color = '\033[38;5;167m'
+        elif ratio >= 0.7:
+            color = '\033[38;5;214m'
+        else:
+            color = '\033[38;5;114m'
+        return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
+
+    def context_bar_color(self, fill_ratio: float) -> str:
+        ratio = min(max(fill_ratio, 0.0), 1.0)
+        if ratio >= 0.9:
+            return '\033[38;5;167m'
+        elif ratio >= 0.7:
+            return '\033[38;5;214m'
+        else:
+            return '\033[38;5;114m'
 
     def openspec_bar(self, name: str, done: int, total: int, width: int = 30) -> str:
         filled, pct = done*width//total, done*100//total
