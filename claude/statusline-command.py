@@ -16,6 +16,19 @@ from typing import NamedTuple
 
 HOME = Path(os.path.expanduser('~'))
 
+MIN_WIDTH = 80
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _is_wide(ch: str) -> bool:
+    cp = ord(ch)
+    return 0x1F300 <= cp <= 0x1FAFF  # emoji only; nerd font PUA/SPUA are 1-wide in most terminals
+
+
+def _visible_width(s: str) -> int:
+    plain = _ANSI_RE.sub('', s)
+    return sum(2 if _is_wide(ch) else 1 for ch in plain)
+
 
 class Model(NamedTuple):
     id: str = ''
@@ -637,6 +650,7 @@ def rainbow_color() -> str:
 
 class Renderer:
     R = '\033[0m'
+    BORDER = '\033[38;5;238m'
     PWD = '\033[38;5;75m'
     BRANCH = '\033[38;5;114m'
     COMMIT = '\033[38;5;244m'
@@ -652,6 +666,19 @@ class Renderer:
     CTX = '\033[38;5;216m'
     BOLDW = '\033[1m\033[38;5;15m'
     BOLDY = '\033[38;5;226m'
+
+    def border_top(self, width: int) -> str:
+        return f'{self.BORDER}╭{"─" * (width - 2)}╮{self.R}'
+
+    def border_bottom(self, width: int) -> str:
+        return f'{self.BORDER}╰{"─" * (width - 2)}╯{self.R}'
+
+    def border_separator(self, width: int) -> str:
+        return f'{self.BORDER}├{"─" * (width - 2)}┤{self.R}'
+
+    def border_line(self, content: str, width: int) -> str:
+        pad = max(0, width - 3 - _visible_width(content))
+        return f'{self.BORDER}│{self.R} {content}{" " * pad}{self.BORDER}│{self.R}'
 
     def path_git(self, short_pwd: str, git: GitInfo, session_id: str) -> str:
         return (
@@ -761,19 +788,36 @@ def main() -> None:
 
     skills = LoadedSkills.from_transcript(session.transcript_path)
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
-    out = f'{Renderer.R}\n'.join([
-        r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
-        r.model_section(session.model_name, session.model_thinking, session.context_window, session.rate_limits.five_hour),
-        r.tokens_cost(session.total_in, session.cache_read, session.total_out, session.token_log.day_in, session.token_log.day_cache_read, session.token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
-    ])
-    for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
-        out += '\n' + r.openspec_bar(name, d, t)
+    token_log = session.token_log
 
+    line_path = r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id)
+    line_model = r.model_section(session.model_name, session.model_thinking, session.context_window, session.rate_limits.five_hour)
+    line_tokens = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
-    if plugins_line:
-        out += f'{Renderer.R}\n' + plugins_line
+    openspec_bars = [r.openspec_bar(name, d, t) for name, d, t in OpenSpec.from_cwd(session.cwd).changes]
 
-    sys.stdout.write(out)
+    all_content = [line_path, line_model, line_tokens]
+    if plugins_line:
+        all_content.append(plugins_line)
+    all_content.extend(openspec_bars)
+    width = max(MIN_WIDTH, max(_visible_width(l) + 4 for l in all_content))
+
+    lines = [
+        r.border_top(width),
+        r.border_line(line_path, width),
+        r.border_line(line_model, width),
+    ]
+    if plugins_line:
+        lines.append(r.border_line(plugins_line, width))
+        lines.append(r.border_separator(width))
+    lines.append(r.border_line(line_tokens, width))
+    if openspec_bars:
+        lines.append(r.border_separator(width))
+        for bar in openspec_bars:
+            lines.append(r.border_line(bar, width))
+    lines.append(r.border_bottom(width))
+
+    sys.stdout.write('\n'.join(lines))
 
 
 if __name__ == '__main__':
