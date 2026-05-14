@@ -241,12 +241,22 @@ class SessionInfo:
         return '/'.join(out_parts)
 
     @property
+    def transcript_usage(self) -> TranscriptUsage:
+        if not hasattr(self, '_transcript_usage_cache'):
+            self._transcript_usage_cache = TranscriptUsage.from_transcript(self.transcript_path)
+        return self._transcript_usage_cache
+
+    @property
     def total_in(self) -> int:
-        return self.context_window.total_input_tokens
+        return self.transcript_usage.billed_in
+
+    @property
+    def cache_read(self) -> int:
+        return self.transcript_usage.cache_read
 
     @property
     def total_out(self) -> int:
-        return self.context_window.total_output_tokens
+        return self.transcript_usage.out
 
     @property
     def model_name(self) -> str:
@@ -265,30 +275,43 @@ class SessionInfo:
     @property
     def token_log(self) -> TokenLog:
         today = datetime.now().strftime('%Y-%m-%d')
-        return TokenLog.update(self.session_id, today, self.total_in, self.total_out)
+        return TokenLog.update(self.session_id, today, self.total_in, self.cache_read, self.total_out)
 
     @property
     def token_rate(self) -> int:
-        return TokenRate.update(self.session_id, self.total_in, self.total_out)
+        return TokenRate.update(self.session_id, self.total_in + self.cache_read, self.total_out)
 
     @property
     def session_cost(self) -> float:
         rate_in, rate_out = self.model.cost_rates
-        return (self.total_in * rate_in + self.total_out * rate_out) / 1_000_000
+        u = self.transcript_usage
+        cost = (
+            u.input_tokens * rate_in
+            + u.cache_creation_input_tokens * rate_in * 1.25
+            + u.cache_read_input_tokens * rate_in * 0.1
+            + u.output_tokens * rate_out
+        )
+        return cost / 1_000_000
 
     @property
     def day_cost(self) -> float:
         rate_in, rate_out = self.model.cost_rates
         log = self.token_log
-        return (log.day_in * rate_in + log.day_out * rate_out) / 1_000_000
+        cost = (
+            log.day_in * rate_in
+            + log.day_cache_read * rate_in * 0.1
+            + log.day_out * rate_out
+        )
+        return cost / 1_000_000
 
 @dataclass
 class TokenLog:
     day_in: int = 0
+    day_cache_read: int = 0
     day_out: int = 0
 
     @classmethod
-    def update(cls, session_id: str, today: str, total_in: int, total_out: int) -> 'TokenLog':
+    def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> 'TokenLog':
         log = HOME / '.claude' / 'statusline-tokens.log'
         lines = []
         if log.exists():
@@ -297,21 +320,29 @@ class TokenLog:
                 if len(parts) >= 2 and parts[1] == session_id:
                     continue
                 lines.append(ln)
-        if session_id and (total_in > 0 or total_out > 0):
-            lines.append(f'{today} {session_id} {total_in} {total_out}')
+        if session_id and (total_in > 0 or cache_read > 0 or total_out > 0):
+            lines.append(f'{today} {session_id} {total_in} {cache_read} {total_out}')
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text('\n'.join(lines) + '\n')
-        day_in = day_out = 0
+        day_in = day_cache_read = day_out = 0
         for ln in lines:
             parts = ln.split()
             if len(parts) < 4 or parts[0] != today:
                 continue
             try:
-                day_in += int(parts[2])
-                day_out += int(parts[3])
+                if len(parts) == 6:
+                    day_in += int(parts[2])
+                    day_out += int(parts[3])
+                elif len(parts) >= 5:
+                    day_in += int(parts[2])
+                    day_cache_read += int(parts[3])
+                    day_out += int(parts[4])
+                else:
+                    day_in += int(parts[2])
+                    day_out += int(parts[3])
             except ValueError:
                 pass
-        return cls(day_in=day_in, day_out=day_out)
+        return cls(day_in=day_in, day_cache_read=day_cache_read, day_out=day_out)
 
 
 class TokenRate:
@@ -470,6 +501,63 @@ class LoadedSkills:
 
 
 @dataclass
+class TranscriptUsage:
+    input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    output_tokens: int = 0
+
+    @classmethod
+    def from_transcript(cls, transcript_path: str) -> 'TranscriptUsage':
+        if not transcript_path:
+            return cls()
+        p = Path(transcript_path)
+        if not p.is_file():
+            return cls()
+        seen: set[str] = set()
+        ti = cc = cr = to = 0
+        try:
+            with p.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if '"usage"' not in ln or '"assistant"' not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except (ValueError, TypeError):
+                        continue
+                    msg = d.get('message') or {}
+                    mid = msg.get('id')
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    u = msg.get('usage') or {}
+                    ti += u.get('input_tokens', 0) or 0
+                    cc += u.get('cache_creation_input_tokens', 0) or 0
+                    cr += u.get('cache_read_input_tokens', 0) or 0
+                    to += u.get('output_tokens', 0) or 0
+        except OSError:
+            return cls()
+        return cls(
+            input_tokens=ti,
+            cache_creation_input_tokens=cc,
+            cache_read_input_tokens=cr,
+            output_tokens=to,
+        )
+
+    @property
+    def billed_in(self) -> int:
+        return self.input_tokens + self.cache_creation_input_tokens
+
+    @property
+    def cache_read(self) -> int:
+        return self.cache_read_input_tokens
+
+    @property
+    def out(self) -> int:
+        return self.output_tokens
+
+
+@dataclass
 class OpenSpec:
     changes: list[tuple[str, int, int]] = field(default_factory=list)
 
@@ -509,6 +597,8 @@ class OpenSpec:
 
 
 def fmt_tok(n: int) -> str:
+    if n >= 1_000_000:
+        return f'{n/1_000_000:.1f}M'
     if n >= 1000:
         return f'{n/1000:.1f}K'
     return str(n)
@@ -603,11 +693,13 @@ class Renderer:
             extras.append(f'{c_plugins}\033[1m  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
-    def tokens_cost(self, sess_in: int, sess_out: int, day_in: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         return (
             f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
+            f' {self.COMMIT}  {self.TOK}{fmt_tok(sess_cache)}{self.R}'
             f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
             f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
+            f' {self.COMMIT}  {self.TOK}{fmt_tok(day_cache)}{self.R}'
             f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
             f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
@@ -672,7 +764,7 @@ def main() -> None:
     out = f'{Renderer.R}\n'.join([
         r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id),
         r.model_section(session.model_name, session.model_thinking, session.context_window, session.rate_limits.five_hour),
-        r.tokens_cost(session.total_in, session.total_out, session.token_log.day_in, session.token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
+        r.tokens_cost(session.total_in, session.cache_read, session.total_out, session.token_log.day_in, session.token_log.day_cache_read, session.token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     ])
     for name, d, t in OpenSpec.from_cwd(session.cwd).changes:
         out += '\n' + r.openspec_bar(name, d, t)

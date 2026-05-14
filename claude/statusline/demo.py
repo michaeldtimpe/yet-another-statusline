@@ -21,7 +21,10 @@ FIXTURE_PATH = WRAPPER_DIR / 'session-info-example.json'
 STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline-command.py'
 
 
-def build_synthetic_env(tmpdir: Path, session_id: str, fixture_in: int, fixture_out: int) -> None:
+DEMO_USAGE_TOTALS = (16322 + 123500, 2600)
+
+
+def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     claude = tmpdir / '.claude'
     project = tmpdir / 'my-project'
 
@@ -40,15 +43,24 @@ def build_synthetic_env(tmpdir: Path, session_id: str, fixture_in: int, fixture_
 
     transcript = claude / 'projects' / session_id / f'{session_id}.jsonl'
     skill_lines = [
-        {'type': 'assistant', 'message': {'content': [
-            {'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'grill-me'}}
-        ]}},
-        {'type': 'assistant', 'message': {'content': [
-            {'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'caveman'}}
-        ]}},
-        {'type': 'assistant', 'message': {'content': [
-            {'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'frontend-design:frontend-design'}}
-        ]}},
+        {'type': 'assistant', 'message': {
+            'id': 'msg_demo_1',
+            'role': 'assistant',
+            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'grill-me'}}],
+            'usage': {'input_tokens': 12, 'cache_creation_input_tokens': 8000, 'cache_read_input_tokens': 24000, 'output_tokens': 540},
+        }},
+        {'type': 'assistant', 'message': {
+            'id': 'msg_demo_2',
+            'role': 'assistant',
+            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'caveman'}}],
+            'usage': {'input_tokens': 6, 'cache_creation_input_tokens': 5200, 'cache_read_input_tokens': 41000, 'output_tokens': 820},
+        }},
+        {'type': 'assistant', 'message': {
+            'id': 'msg_demo_3',
+            'role': 'assistant',
+            'content': [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': 'frontend-design:frontend-design'}}],
+            'usage': {'input_tokens': 4, 'cache_creation_input_tokens': 3100, 'cache_read_input_tokens': 58500, 'output_tokens': 1240},
+        }},
     ]
     transcript.write_text('\n'.join(json.dumps(ln) for ln in skill_lines) + '\n')
 
@@ -63,8 +75,9 @@ def build_synthetic_env(tmpdir: Path, session_id: str, fixture_in: int, fixture_
     )
 
     seed_ts = time.time() - 30
-    seed_in = max(0, fixture_in - 100)
-    seed_out = max(0, fixture_out - 20)
+    total_in, total_out = DEMO_USAGE_TOTALS
+    seed_in = max(0, total_in - 500)
+    seed_out = max(0, total_out - 80)
     (claude / 'statusline-token-rate.log').write_text(
         f'{seed_ts:.3f} {session_id} {seed_in} {seed_out}\n'
     )
@@ -88,13 +101,10 @@ def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
 def main() -> int:
     fixture = json.loads(FIXTURE_PATH.read_text())
     session_id = fixture['session_id']
-    ctx = fixture.get('context_window', {})
-    fixture_in = int(ctx.get('total_input_tokens', 0))
-    fixture_out = int(ctx.get('total_output_tokens', 0))
 
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmpdir = Path(raw_tmp)
-        build_synthetic_env(tmpdir, session_id, fixture_in, fixture_out)
+        build_synthetic_env(tmpdir, session_id)
         payload = mutate_session_info(tmpdir, session_id, fixture)
 
         env = os.environ.copy()
