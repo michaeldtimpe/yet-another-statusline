@@ -637,7 +637,7 @@ def rainbow_color() -> str:
 
 class Renderer:
     R = '\033[0m'
-    BORDER = '\033[38;5;238m'
+    BORDER = '\033[38;5;244m'
     PWD = '\033[38;5;75m'
     BRANCH = '\033[38;5;114m'
     COMMIT = '\033[38;5;244m'
