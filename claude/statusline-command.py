@@ -17,6 +17,7 @@ from typing import NamedTuple
 HOME = Path(os.path.expanduser('~'))
 
 MIN_WIDTH = 80
+SOFT_LIMIT = 150_000
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 
@@ -402,14 +403,14 @@ class TokenRate:
 class GitInfo:
     branch: str = ''
     commit: str = ''
-    modified: str = ''
-    untracked: str = ''
+    modified: int = 0
+    untracked: int = 0
 
     @classmethod
     def from_cwd(cls, cwd: str) -> 'GitInfo':
         repo, gitdir = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)
-        modified = untracked = ''
+        modified = untracked = 0
         if branch:
             modified, untracked = cls._dirty(repo)
         return cls(branch=branch, commit=commit, modified=modified, untracked=untracked)
@@ -459,28 +460,25 @@ class GitInfo:
         return branch, commit
 
     @staticmethod
-    def _dirty(repo: str) -> tuple[str, str]:
-        modified = untracked = ''
+    def _dirty(repo: str) -> tuple[int, int]:
+        modified = untracked = 0
         if not repo:
             return modified, untracked
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'ls-files', '-m', '--no-optional-locks'],
+                ['git', '-C', repo, 'ls-files', '-m'],
                 capture_output=True, text=True, timeout=2,
             )
-            if r.stdout.strip():
-                modified = '\033[38;5;214m✹\033[0m'
+            modified = sum(1 for l in r.stdout.splitlines() if l.strip())
         except Exception:
             pass
         try:
             r = subprocess.run(
                 ['git', '-C', repo, 'ls-files', '--others', '--exclude-standard',
-                 '--directory', '--no-empty-directory', '--no-optional-locks',
-                 '--', ':/*'],
+                 '--directory', '--no-empty-directory'],
                 capture_output=True, text=True, timeout=2,
             )
-            if r.stdout.strip():
-                untracked = '\033[38;5;214m✭\033[0m'
+            untracked = sum(1 for l in r.stdout.splitlines() if l.strip())
         except Exception:
             pass
         return modified, untracked
@@ -624,19 +622,8 @@ RAINBOW_PALETTE = (
 )
 
 
-def rainbow_step(advance: bool = True) -> int:
-    state = HOME / '.claude' / 'statusline-rainbow'
-    try:
-        n = int(state.read_text().strip())
-    except (OSError, ValueError):
-        n = 0
-    if advance:
-        try:
-            state.parent.mkdir(parents=True, exist_ok=True)
-            state.write_text(str((n + 1) % len(RAINBOW_PALETTE)))
-        except OSError:
-            pass
-    return n
+def rainbow_step() -> int:
+    return int(time.time()) % len(RAINBOW_PALETTE)
 
 
 def rainbow_at(step: int, offset: int = 0) -> str:
@@ -645,7 +632,7 @@ def rainbow_at(step: int, offset: int = 0) -> str:
 
 
 def rainbow_color() -> str:
-    return rainbow_at(rainbow_step(advance=True))
+    return rainbow_at(rainbow_step())
 
 
 class Renderer:
@@ -659,9 +646,11 @@ class Renderer:
     SKILLS = '\033[38;5;222m'
     TIME = '\033[38;5;244m'
     TOK = '\033[38;5;116m'
+    TOK_DIM = '\033[38;5;103m'
     COST = '\033[38;5;210m'
     BAR_FILL = '\033[38;5;114m'
     BAR_EMPTY = '\033[38;5;238m'
+    DIM_GREEN = '\033[38;5;77m'
     LABEL = '\033[38;5;244m'
     CTX = '\033[38;5;216m'
     BOLDW = '\033[1m\033[38;5;15m'
@@ -680,37 +669,66 @@ class Renderer:
         pad = max(0, width - 3 - _visible_width(content))
         return f'{self.BORDER}│{self.R} {content}{" " * pad}{self.BORDER}│{self.R}'
 
-    def path_git(self, short_pwd: str, git: GitInfo, session_id: str) -> str:
+    def path_git(self, short_pwd: str, git: GitInfo, session_id: str, elapsed: str = '') -> str:
+        dirty = ''
+        if git.modified > 0:
+            dirty += f' \033[38;5;214m✹ {git.modified}\033[0m'
+        if git.untracked > 0:
+            dirty += f' \033[38;5;214m✭ {git.untracked}\033[0m'
+        if elapsed and elapsed != '0m':
+            session_label = f'[{session_id} · {elapsed}]'
+        else:
+            session_label = f'[{session_id}]'
+
         return (
             f'\033[38;5;117m  {self.PWD}{short_pwd}{self.R}'
             f' {self.LABEL}\033[38;5;46m\033[1m∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{self.LABEL}/{self.R}'
             f'{self.COMMIT}{git.commit}{self.R}'
-            f'{git.modified}{git.untracked}'
-            f' {self.SESSION}[{session_id}]{self.R}'
+            f'{dirty}'
+            f' {self.SESSION}{session_label}{self.R}'
         )
 
-    def model_section(self, model_name: str, model_thinking: str, ctx: ContextWindow, five_hour_limit: str) -> str:
-        step = rainbow_step(advance=True)
+    def model_colour(self, model_name: str) -> str:
+        m = model_name.lower()
+        if 'opus' in m:
+            return '\033[38;5;226m'
+        if 'sonnet' in m:
+            return '\033[38;5;114m'
+        if 'haiku' in m:
+            return '\033[38;5;75m'
+        return '\033[38;5;183m'
+
+    def fill_colour(self, pct: float) -> str:
+        if pct >= 90:
+            return '\033[38;5;167m'
+        if pct >= 70:
+            return '\033[38;5;214m'
+        return '\033[38;5;114m'
+
+    def day_cost_colour(self, cost: float) -> str:
+        if cost > 50:
+            return '\033[38;5;167m'
+        if cost >= 25:
+            return '\033[38;5;226m'
+        return '\033[38;5;114m'
+
+    def model_section(self, model_name: str, model_thinking: str, rate_limits: 'RateLimits') -> str:
+        step = rainbow_step()
         c_think = rainbow_at(step, 0)
         c_helper = rainbow_at(step, 9)
-        line = f'{self.MODEL}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{self.MODEL}\033[3m{model_thinking}\033[0m'
-        if ctx.used_percentage is not None and ctx.used_percentage != '':
-            try:
-                ctx_fmt = f'{float(ctx.used_percentage):.0f}'
-                total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-                fill_ratio = min(total_tokens / 150_000, 1.0)
-                bar_color = self.context_bar_color(fill_ratio)
-                bar = self.context_bar(fill_ratio)
-                line += f' {self.LABEL}|{self.R} {bar} {bar_color}{ctx_fmt}%{self.R} {self.LABEL}({self.SKILLS}\033[22;3m{fmt_tok(total_tokens)}{self.R}{self.LABEL}){self.R}'
-            except (TypeError, ValueError):
-                pass
-        line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(five_hour_limit)}{self.R}'
+        model_clr = self.model_colour(model_name)
+        line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}\033[1m󱩓  {self.R}{model_clr}\033[3m{model_thinking}\033[0m'
+        line += f' |{self.R} {c_helper}\033[1m{self.R} \033[38;5;15m\033[1m {self.helper(rate_limits.five_hour)}{self.R}'
+        seven_day = rate_limits.seven_day
+        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
+            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
+            line += f' {self.LABEL}| 7d: {seven_clr}{seven_day.used_percentage}%{self.R}'
         return line
 
     def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
-        step = rainbow_step(advance=False)
+        step = rainbow_step()
         c_skills = rainbow_at(step, 3)
         c_plugins = rainbow_at(step, 6)
         extras = []
@@ -721,23 +739,20 @@ class Renderer:
         return f' {self.LABEL}|{self.R} '.join(extras)
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
+        day_clr = self.day_cost_colour(day_cost)
         return (
-            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R}'
-            f' {self.COMMIT}  {self.TOK}{fmt_tok(sess_cache)}{self.R}'
-            f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
-            f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R}'
-            f' {self.COMMIT}  {self.TOK}{fmt_tok(day_cache)}{self.R}'
-            f'{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
+            f'{self.R}\033[38;5;11m󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
+            f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R} {self.TOK_DIM}({fmt_tok(day_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
             f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
             f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
-            f'{self.LABEL}/{self.R}{self.COST}${day_cost:,.2f}{self.R}'
+            f'{self.LABEL}/{self.R}{day_clr}${day_cost:,.2f}{self.R}'
         )
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
-        filled = int(ratio * 20)
+        filled = int(ratio * 30)
         bar_filled = '█' * filled
-        bar_empty = '░' * (20 - filled)
+        bar_empty = '░' * (30 - filled)
         if ratio >= 0.9:
             color = '\033[38;5;167m'
         elif ratio >= 0.7:
@@ -755,6 +770,35 @@ class Renderer:
         else:
             return '\033[38;5;114m'
 
+    def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
+        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
+        fill_ratio = min(total_tokens / SOFT_LIMIT, 1.0)
+        pct_soft = total_tokens / SOFT_LIMIT * 100
+        alert = total_tokens >= SOFT_LIMIT
+
+        if alert:
+            A = '\033[1m\033[38;5;167m'
+            secondary = ''
+            if ctx.context_window_size > 0:
+                pct_model = total_tokens / ctx.context_window_size * 100
+                secondary = f' {A}({pct_model:.0f}%){self.R}'
+            prefix = f'{secondary} {A}{fmt_tok(total_tokens)}{self.R} {A}\033[1m{pct_soft:.0f}%{self.R}{A}⚡ /clear?{self.R} '
+            bar_w = max(4, available - _visible_width(prefix))
+            filled = int(min(fill_ratio, 1.0) * bar_w)
+            bar = f'{A}{"█" * filled}{"░" * (bar_w - filled)}{self.R}'
+            return f'{A}{self.R} {prefix}{bar}'
+        else:
+            bar_clr = self.fill_colour(pct_soft)
+            secondary = ''
+            if ctx.context_window_size > 0:
+                pct_model = total_tokens / ctx.context_window_size * 100
+                secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
+            prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}\033[1m{pct_soft:.0f}% '
+            bar_w = max(4, available - _visible_width(prefix))
+            filled = int(fill_ratio * bar_w)
+            bar = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
+            return f'{bar_clr}{self.R} {prefix}{bar}'
+
     def openspec_bar(self, name: str, done: int, total: int, width: int = 30) -> str:
         filled, pct = done*width//total, done*100//total
         bar_filled, bar_empty = '█' * filled, '░' * (width - filled)
@@ -766,18 +810,19 @@ class Renderer:
         )
 
     def helper(self, five_hour: RateBucket) -> str:
+        pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
         try:
             if not five_hour.resets_at:
                 if not five_hour.used_percentage:
-                    return f'∞'
-                return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}∞'
+                    return '∞'
+                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
             resets_at = datetime.fromtimestamp(five_hour.resets_at).astimezone()
             delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
             if delta.total_seconds() <= 0:
                 if not five_hour.used_percentage:
-                    return f'∞'
-                return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}∞'
-            return f'{five_hour.used_percentage}% {self.R}{self.COMMIT}T-{delta}'
+                    return '∞'
+                return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
+            return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}T-{delta}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
 
@@ -790,21 +835,26 @@ def main() -> None:
     skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
     token_log = session.token_log
 
-    line_path = r.path_git(session.short_pwd, GitInfo.from_cwd(session.cwd), session.session_id)
-    line_model = r.model_section(session.model_name, session.model_thinking, session.context_window, session.rate_limits.five_hour)
+    git = GitInfo.from_cwd(session.cwd)
+    line_path = r.path_git(session.short_pwd, git, session.session_id, session.elapsed)
+    line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
     line_tokens = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     openspec_bars = [r.openspec_bar(name, d, t) for name, d, t in OpenSpec.from_cwd(session.cwd).changes]
 
-    all_content = [line_path, line_model, line_tokens]
+    other_content = [line_path, line_model, line_tokens]
     if plugins_line:
-        all_content.append(plugins_line)
-    all_content.extend(openspec_bars)
-    width = max(MIN_WIDTH, max(_visible_width(l) + 4 for l in all_content))
+        other_content.append(plugins_line)
+    other_content.extend(openspec_bars)
+    width = max(MIN_WIDTH, max(_visible_width(l) + 4 for l in other_content))
+
+    # context line fills to the computed width; available = width minus borders/padding
+    line_context = r.context_line(session.context_window, width - 3)
 
     lines = [
         r.border_top(width),
         r.border_line(line_path, width),
+        r.border_line(line_context, width),
         r.border_line(line_model, width),
     ]
     if plugins_line:
