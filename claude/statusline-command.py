@@ -799,14 +799,19 @@ class Renderer:
             bar = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
             return f'{bar_clr}{self.R} {prefix}{bar}'
 
-    def openspec_bar(self, name: str, done: int, total: int, width: int = 30) -> str:
-        filled, pct = done*width//total, done*100//total
-        bar_filled, bar_empty = '█' * filled, '░' * (width - filled)
+    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80) -> str:
+        pct = done * 100 // total
+        title = (name[:22] + '...') if len(name) > 25 else name.ljust(25)
+        # title(25) + space(1) + space(1) + counts + space(1) + pct(4)
+        suffix_visible = 7 + len(str(done)) + len(str(total))
+        bar_w = max(4, (box_width - 3) - 26 - suffix_visible)
+        filled = done * bar_w // total
+        bar_filled, bar_empty = '█' * filled, '░' * (bar_w - filled)
 
         return (
+            f'{self.LABEL}\033[3m{title}\033[0m{self.R} '
             f'{self.BAR_FILL}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
             f' {self.LABEL}{done}/{total}{self.R} \033[1m{pct:>3d}%\033[0m'
-            f' {self.LABEL}\033[3m{name}\033[0m{self.R}'
         )
 
     def helper(self, five_hour: RateBucket) -> str:
@@ -840,13 +845,12 @@ def main() -> None:
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
     line_tokens = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
-    openspec_bars = [r.openspec_bar(name, d, t) for name, d, t in OpenSpec.from_cwd(session.cwd).changes]
 
     other_content = [line_path, line_model, line_tokens]
     if plugins_line:
         other_content.append(plugins_line)
-    other_content.extend(openspec_bars)
     width = max(MIN_WIDTH, max(_visible_width(l) + 4 for l in other_content))
+    openspec_bars = [r.openspec_bar(name, d, t, width) for name, d, t in OpenSpec.from_cwd(session.cwd).changes]
 
     # context line fills to the computed width; available = width minus borders/padding
     line_context = r.context_line(session.context_window, width - 3)
