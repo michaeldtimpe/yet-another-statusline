@@ -783,7 +783,7 @@ class Renderer:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {A}({pct_model:.0f}%){self.R}'
             prefix = f'{secondary} {A}{fmt_tok(total_tokens)}{self.R} {A}\033[1m{pct_soft:.0f}%{self.R}{A}⚡ /clear?{self.R} '
-            bar_w = max(4, available - _visible_width(prefix))
+            bar_w = max(4, available - _visible_width(prefix)-3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             bar = f'{A}{"█" * filled}{"░" * (bar_w - filled)}{self.R}'
             return f'{A}{self.R} {prefix}{bar}'
@@ -794,7 +794,7 @@ class Renderer:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
             prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}\033[1m{pct_soft:.0f}% '
-            bar_w = max(4, available - _visible_width(prefix))
+            bar_w = max(4, available - _visible_width(prefix)-3)
             filled = int(fill_ratio * bar_w)
             bar = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
             return f'{bar_clr}{self.R} {prefix}{bar}'
