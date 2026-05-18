@@ -818,19 +818,16 @@ class Renderer:
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         day_clr = self.day_cost_colour(day_cost)
-        return (
-            f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R}'
-            f' / {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R} {self.TOK_DIM}({fmt_tok(day_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}'
-            f' {self.LABEL}|{self.R} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
-            f' | 💰 {self.COST}${sess_cost:,.2f}{self.R}'
-            f'{self.LABEL}/{self.R}{day_clr}${day_cost:,.2f}{self.R}'
-        )
+        return [
+            f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R} {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R} 💰 {self.COST}${sess_cost:,.2f}{self.R}',
+            f'   {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R} {self.TOK_DIM}({fmt_tok(day_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}    {self.LABEL}{self.R}{day_clr}${day_cost:,.2f}{self.R}',
+        ]
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
         filled = int(ratio * 30)
-        bar_filled = '█' * filled
-        bar_empty = '░' * (30 - filled)
+        bar_filled = '▰' * filled
+        bar_empty = '▱' * (30 - filled)
         if ratio >= 0.9:
             color = CLR_ALERT
         elif ratio >= 0.7:
@@ -862,7 +859,7 @@ class Renderer:
             prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R}{a}⚡ /clear?{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
-            bar    = f'{a}{"█" * filled}{"░" * (bar_w - filled)}{self.R}'
+            bar    = f'{a}{"▰" * filled}{"▱" * (bar_w - filled)}{self.R}'
             return f'{a}{self.R} {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -873,7 +870,7 @@ class Renderer:
         prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
-        bar    = f'{bar_clr}{"█" * filled}{self.R}{self.BAR_EMPTY}{"░" * (bar_w - filled)}{self.R}'
+        bar    = f'{bar_clr}{"▰" * filled}{self.R}{self.BAR_EMPTY}{"▱" * (bar_w - filled)}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
     def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
@@ -885,7 +882,7 @@ class Renderer:
         suffix_visible = 7 + len(str(done)) + len(str(total))
         bar_w = max(4, (box_width - 3) - (title_w + 1) - suffix_visible)
         filled = done * bar_w // total
-        bar_filled, bar_empty = '█' * filled, '░' * (bar_w - filled)
+        bar_filled, bar_empty = '▰' * filled, '▱' * (bar_w - filled)
 
         return (
             f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
@@ -936,13 +933,15 @@ def main() -> None:
     lines = [
         r.border_top(width, session.session_id),
         r.border_line(line_path, width),
-        r.border_line(line_context, width),
         r.border_line(line_model, width),
     ]
     if plugins_line:
         lines.append(r.border_line(plugins_line, width))
-        lines.append(r.border_separator(width))
-    lines.append(r.border_line(line_tokens, width))
+    lines.append(r.border_separator(width))
+    lines.append(r.border_line(line_context, width))
+    lines.append(r.border_separator(width))
+    for lt in line_tokens:
+        lines.append(r.border_line(lt, width))
     if openspec_bars:
         lines.append(r.border_separator(width))
         for bar in openspec_bars:
