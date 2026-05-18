@@ -349,7 +349,7 @@ class SessionInfo:
 
     @property
     def token_rate(self) -> int:
-        return TokenRate.update(self.session_id, self.total_in + self.cache_read, self.total_out)
+        return TokenRate.update(self.session_id, self.total_in, self.total_out)
 
     @property
     def session_cost(self) -> float:
@@ -741,11 +741,31 @@ class Renderer:
             return f'{self.BORDER}╭──{self.SESSION}{sid}{self.BORDER}{"─" * rest}╮{self.R}'
         return f'{self.BORDER}╭{"─" * (width - 2)}╮{self.R}'
 
-    def border_bottom(self, width: int) -> str:
-        return f'{self.BORDER}╰{"─" * (width - 2)}╯{self.R}'
+    def border_bottom(self, width: int, ups: tuple[int, ...] = ()) -> str:
+        ups_set = set(ups)
+        chars = ''.join('┴' if (i + 2) in ups_set else '─' for i in range(width - 2))
+        return f'{self.BORDER}╰{chars}╯{self.R}'
 
-    def border_separator(self, width: int) -> str:
-        return f'{self.BORDER}├{"─" * (width - 2)}┤{self.R}'
+    def border_separator(self, width: int, ups: tuple[int, ...] = ()) -> str:
+        ups_set = set(ups)
+        chars = ''.join('┴' if (i + 2) in ups_set else '─' for i in range(width - 2))
+        return f'{self.BORDER}├{chars}┤{self.R}'
+
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = ()) -> str:
+        palette = (244, 243, 242, 241, 240)
+        n = width - 2
+        mid = (n - 1) / 2
+        downs_set = set(downs)
+        parts = []
+        for i in range(n):
+            col = i + 2
+            if col in downs_set:
+                parts.append(f'{self.BORDER}┬')
+                continue
+            dist = mid - abs(i - mid)
+            idx = min(int(dist), len(palette) - 1)
+            parts.append(f'\033[38;5;{palette[idx]}m┄')
+        return f'{self.BORDER}├{"".join(parts)}{self.BORDER}┤{self.R}'
 
     def border_line(self, content: str, width: int) -> str:
         pad = max(0, width - 3 - _visible_width(content))
@@ -818,10 +838,36 @@ class Renderer:
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int) -> str:
         day_clr = self.day_cost_colour(day_cost)
+
+        sess_in_s, day_in_s       = fmt_tok(sess_in), fmt_tok(day_in)
+        sess_cache_s, day_cache_s = fmt_tok(sess_cache), fmt_tok(day_cache)
+        sess_out_s, day_out_s     = fmt_tok(sess_out), fmt_tok(day_out)
+        in_w    = max(len(sess_in_s), len(day_in_s))
+        cache_w = max(len(sess_cache_s), len(day_cache_s))
+        out_w   = max(len(sess_out_s), len(day_out_s))
+        sess_in_s,    day_in_s    = sess_in_s.rjust(in_w),       day_in_s.rjust(in_w)
+        sess_cache_s, day_cache_s = sess_cache_s.rjust(cache_w), day_cache_s.rjust(cache_w)
+        sess_out_s,   day_out_s   = sess_out_s.rjust(out_w),     day_out_s.rjust(out_w)
+
+        leader1 = f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        leader2 = ' ' * _visible_width(leader1)
+        vsep    = f'  {self.BORDER}│{self.R}  '
+
+        middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
+        middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{day_in_s}{self.R} {self.TOK_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{day_out_s}{self.R}'
+
+        end1 = f'💰  {self.COST}${sess_cost:,.2f}{self.R}'
+        end2 = f'    {self.LABEL}{self.R}{day_clr}${day_cost:,.2f}{self.R}'
+
+        w_leader = _visible_width(leader1)
+        w_middle = _visible_width(middle1)
+        col1 = w_leader + 5
+        col2 = w_leader + w_middle + 10
+
         return [
-            f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R} {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(sess_in)}{self.R} {self.TOK_DIM}({fmt_tok(sess_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(sess_out)}{self.R} 💰 {self.COST}${sess_cost:,.2f}{self.R}',
-            f'   {self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{fmt_tok(day_in)}{self.R} {self.TOK_DIM}({fmt_tok(day_cache)}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{fmt_tok(day_out)}{self.R}    {self.LABEL}{self.R}{day_clr}${day_cost:,.2f}{self.R}',
-        ]
+            f'{leader1}{vsep}{middle1}{vsep}{end1}',
+            f'{leader2}{vsep}{middle2}{vsep}{end2}',
+        ], (col1, col2)
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -835,6 +881,32 @@ class Renderer:
         else:
             color = CLR_GREEN_OK
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
+
+    def gradient_color(self, t: float) -> str:
+        t = max(0.0, min(1.0, t))
+        stops = (
+            (0.00, ( 40, 200,  80)),
+            (0.50, (240, 220,  40)),
+            (0.75, (240, 140,  30)),
+            (1.00, (220,  40,  40)),
+        )
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            if t <= t1:
+                u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+                r = int(c0[0] + (c1[0] - c0[0]) * u)
+                g = int(c0[1] + (c1[1] - c0[1]) * u)
+                b = int(c0[2] + (c1[2] - c0[2]) * u)
+                return f'\033[38;2;{r};{g};{b}m'
+        r, g, b = stops[-1][1]
+        return f'\033[38;2;{r};{g};{b}m'
+
+    def gradient_bar(self, filled: int, bar_w: int) -> str:
+        if filled <= 0 or bar_w <= 0:
+            return ''
+        denom = max(1, bar_w - 1)
+        return ''.join(f'{self.gradient_color(i / denom)}▰' for i in range(filled))
 
     def context_bar_color(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -859,7 +931,7 @@ class Renderer:
             prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R}{a}⚡ /clear?{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
-            bar    = f'{a}{"▰" * filled}{"▱" * (bar_w - filled)}{self.R}'
+            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{"▱" * (bar_w - filled)}{self.R}'
             return f'{a}{self.R} {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -870,7 +942,7 @@ class Renderer:
         prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
-        bar    = f'{bar_clr}{"▰" * filled}{self.R}{self.BAR_EMPTY}{"▱" * (bar_w - filled)}{self.R}'
+        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{"▱" * (bar_w - filled)}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
     def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
@@ -919,7 +991,7 @@ def main() -> None:
     git = GitInfo.from_cwd(session.cwd)
     line_path = r.path_git(session.short_pwd, git, session.elapsed)
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
-    line_tokens = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
+    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
 
     width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
@@ -937,16 +1009,18 @@ def main() -> None:
     ]
     if plugins_line:
         lines.append(r.border_line(plugins_line, width))
-    lines.append(r.border_separator(width))
+    lines.append(r.border_separator_dim(width))
     lines.append(r.border_line(line_context, width))
-    lines.append(r.border_separator(width))
+    lines.append(r.border_separator_dim(width, downs=vsep_cols))
     for lt in line_tokens:
         lines.append(r.border_line(lt, width))
     if openspec_bars:
-        lines.append(r.border_separator(width))
+        lines.append(r.border_separator(width, ups=vsep_cols))
         for bar in openspec_bars:
             lines.append(r.border_line(bar, width))
-    lines.append(r.border_bottom(width))
+        lines.append(r.border_bottom(width))
+    else:
+        lines.append(r.border_bottom(width, ups=vsep_cols))
 
     sys.stdout.write('\n'.join(lines))
 
