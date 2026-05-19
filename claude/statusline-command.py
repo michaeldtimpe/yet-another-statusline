@@ -433,7 +433,7 @@ class TokenLog:
 
 
 class TokenRate:
-    WINDOW = 60.0
+    WINDOW = float(os.environ.get('STATUSLINE_TOKEN_WINDOW', '60'))
     KEEP = 300.0
 
     @classmethod
@@ -1013,7 +1013,7 @@ class Renderer:
         if plugin_names:
             extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         if subagents:
-            names = ','.join((_short_agent_name(t, d)) for t, d in executors)
+            names = ','.join((_short_agent_name(t, d)) for t, d in subagents)
             extras.append(f'{c_subagent}{BOLD}  {self.R}{CLR_PEACH}{names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
@@ -1076,7 +1076,7 @@ class Renderer:
         leader1 = f'{" " * pad_left}{rate_label}{" " * pad_right}'
 
         if session_id:
-            spark_history = TokenRate.history(session_id, leader_w, leader_w * 2.0)
+            spark_history = TokenRate.history(session_id, leader_w, TokenRate.WINDOW * 2)
             leader2 = self.sparkline(spark_history)
         else:
             leader2 = ' ' * leader_w

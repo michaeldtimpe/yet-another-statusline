@@ -9,7 +9,6 @@ residue on the developer's real filesystem.
 from __future__ import annotations
 
 import json
-import math
 import os
 import random
 import subprocess
@@ -40,6 +39,16 @@ PLUGINS_PROGRESSION = (
     ['openspec@0.1.0', 'frontend-design@0.3.2', 'rocky@0.1.0'],
 )
 
+# (agentType, description) pairs — None means no subagent active
+SUBAGENTS_PROGRESSION = (
+    None,
+    ('explore', 'Search codebase - looking for token tracking'),
+    ('explore', 'Search codebase - looking for token tracking'),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm'),
+    ('general-purpose', 'Fix sparkline - update bucket algorithm'),
+    None,
+)
+
 
 def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     claude = tmpdir / '.claude'
@@ -66,6 +75,23 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     (claude / 'statusline-tokens.log').write_text(
         f'{today} demo-prior-session 8200000 215000000 1450000\n'
     )
+
+
+def write_subagents(claude_dir: Path, session_id: str, project_dir: Path, subagent: tuple[str, str] | None) -> None:
+    project_slug = str(project_dir).replace('/', '-').lstrip('-')
+    subagents_dir = claude_dir / 'projects' / f'-{project_slug}' / session_id / 'subagents'
+    subagents_dir.mkdir(parents=True, exist_ok=True)
+    for f in subagents_dir.iterdir():
+        f.unlink()
+    if subagent is not None:
+        agent_type, description = subagent
+        name = 'demo-subagent-1'
+        meta = subagents_dir / f'{name}.meta.json'
+        jsonl = subagents_dir / f'{name}.jsonl'
+        meta.write_text(json.dumps({'agentType': agent_type, 'description': description}))
+        jsonl.write_text('')
+        now = time.time()
+        os.utime(jsonl, (now, now))
 
 
 def write_settings(claude_dir: Path, plugins: list[str]) -> None:
@@ -128,7 +154,13 @@ def render_once(env: dict, payload: str) -> str:
     return result.stdout
 
 
-def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60, delay: float = 0.10) -> None:
+DEMO_STEPS = 60
+DEMO_DELAY = 0.10
+DEMO_DURATION = DEMO_STEPS * DEMO_DELAY  # real seconds the demo runs
+DEMO_TOKEN_WINDOW = DEMO_DURATION * 1.2  # window slightly wider than demo so first bars are visible
+
+
+def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DEMO_STEPS, delay: float = DEMO_DELAY) -> None:
     raw.setdefault('context_window', {})
     raw.setdefault('rate_limits', {}).setdefault('five_hour', {})
     raw['rate_limits'].setdefault('seven_day', {})
@@ -141,6 +173,18 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60
     spec_total   = 8
 
     rng = random.Random(42)
+    KEEP = max(300.0, DEMO_TOKEN_WINDOW * 4)
+
+    graph_window = DEMO_TOKEN_WINDOW * 2
+    now0 = time.time()
+    seed_entries: list[str] = []
+    for j in range(61):
+        t = now0 - graph_window + (graph_window * j / 60)
+        progress = j / 60
+        hist_in = int(150_000 * progress * 1.05 * 1.18) + int(rng.random() * 800)
+        hist_out = int(7_500 * progress + 120) + int(rng.random() * 200)
+        seed_entries.append(f'{t:.3f} {session_id} {hist_in} {hist_out}')
+    rate_log.write_text('\n'.join(seed_entries) + '\n')
 
     sys.stdout.write('\n\n')
     last_lines = 0
@@ -153,10 +197,12 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60
         total_cr   = int(total_in * 12.0)
         total_out  = int(7_500 * pct + 120)
 
-        skill_idx  = min(int(pct * len(SKILLS_PROGRESSION)),  len(SKILLS_PROGRESSION) - 1)
-        plugin_idx = min(int(pct * len(PLUGINS_PROGRESSION)), len(PLUGINS_PROGRESSION) - 1)
-        skills_now  = SKILLS_PROGRESSION[skill_idx]
-        plugins_now = PLUGINS_PROGRESSION[plugin_idx]
+        skill_idx    = min(int(pct * len(SKILLS_PROGRESSION)),    len(SKILLS_PROGRESSION) - 1)
+        plugin_idx   = min(int(pct * len(PLUGINS_PROGRESSION)),   len(PLUGINS_PROGRESSION) - 1)
+        subagent_idx = min(int(pct * len(SUBAGENTS_PROGRESSION)), len(SUBAGENTS_PROGRESSION) - 1)
+        skills_now   = SKILLS_PROGRESSION[skill_idx]
+        plugins_now  = PLUGINS_PROGRESSION[plugin_idx]
+        subagent_now = SUBAGENTS_PROGRESSION[subagent_idx]
 
         spec_done = min(spec_total, int(pct * spec_total) + 1)
         moving_spec.write_text(
@@ -166,20 +212,16 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60
 
         write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out)
         write_settings(claude, plugins_now)
+        write_subagents(claude, session_id, project, subagent_now)
 
         now = time.time()
         cumul_in = total_in + total_cc
         cumul_out = total_out
-        n_history = 30
-        entries = []
-        for j in range(n_history + 1):
-            t = now - 60.0 + (60.0 * j / n_history)
-            progress = (j / n_history) * pct
-            hist_in = int(150_000 * progress * 1.05 * 1.18) + int(rng.random() * 800)
-            hist_out = int(7_500 * progress + 120) + int(rng.random() * 200)
-            entries.append(f'{t:.3f} {session_id} {hist_in} {hist_out}')
-        entries.append(f'{now:.3f} {session_id} {cumul_in} {cumul_out}')
-        rate_log.write_text('\n'.join(entries) + '\n')
+
+        existing = rate_log.read_text().splitlines() if rate_log.exists() else []
+        kept = [ln for ln in existing if ln and now - float(ln.split()[0]) <= KEEP]
+        kept.append(f'{now:.3f} {session_id} {cumul_in} {cumul_out}')
+        rate_log.write_text('\n'.join(kept) + '\n')
 
         raw['context_window']['total_input_tokens']  = total_in
         raw['context_window']['total_output_tokens'] = total_out
@@ -210,6 +252,7 @@ def main() -> int:
 
         env = os.environ.copy()
         env['HOME'] = str(tmpdir)
+        env['STATUSLINE_TOKEN_WINDOW'] = str(DEMO_TOKEN_WINDOW)
 
         animate(env, raw, tmpdir, session_id)
     return 0
