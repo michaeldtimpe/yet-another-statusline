@@ -426,7 +426,7 @@ class TokenLog:
 
 class TokenRate:
     WINDOW = 60.0
-    KEEP = 180.0
+    KEEP = 300.0
 
     @classmethod
     def update(cls, session_id: str, total_in: int, total_out: int) -> int:
@@ -915,7 +915,7 @@ class Renderer:
         parts = []
         for val in history:
             if val == 0 or max_val == 0:
-                parts.append(f'{CLR_GREY_DARK}▁{self.R}')
+                parts.append(' ')
             else:
                 ratio = val / max_val
                 idx = min(int(ratio * 7), 7)
@@ -927,7 +927,7 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, spark_history: list[int] | None = None, box_width: int = 80) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80) -> str:
         day_clr = self.day_cost_colour(day_cost)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -964,13 +964,9 @@ class Renderer:
         pad_right = max(0, leader_w - rate_label_w - pad_left)
         leader1 = f'{" " * pad_left}{rate_label}{" " * pad_right}'
 
-        if spark_history:
-            display = spark_history[-leader_w:] if len(spark_history) > leader_w else spark_history
-            spark_str = self.sparkline(display)
-            pad = max(0, leader_w - len(display))
-            pad_l = pad // 2
-            pad_r = pad - pad_l
-            leader2 = f'{" " * pad_l}{spark_str}{" " * pad_r}'
+        if session_id:
+            spark_history = TokenRate.history(session_id, leader_w, leader_w * 2.0)
+            leader2 = self.sparkline(spark_history)
         else:
             leader2 = ' ' * leader_w
 
@@ -1169,12 +1165,11 @@ def main() -> None:
     token_log = session.token_log
 
     width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
-    spark_history = TokenRate.history(session.session_id, 30, 60.0) if session.session_id else []
 
     git = GitInfo.from_cwd(session.cwd)
     line_path = r.path_git(session.short_pwd, git, session.elapsed)
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
-    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, spark_history, width)
+    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, session.session_id, width)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     changes = OpenSpec.from_cwd(session.cwd).changes
     title_cap = max(10, width - 45)
