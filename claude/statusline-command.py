@@ -23,8 +23,10 @@ class BarChars:
 
 
 HOME       = Path(os.path.expanduser('~'))
-MIN_WIDTH  = 80
-MAX_WIDTH  = 160
+MIN_WIDTH    = 40
+MAX_WIDTH    = 160
+NARROW_WIDTH = 55
+MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -858,6 +860,13 @@ class Renderer:
             f'{dirty}{tail}'
         )
 
+    def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
+        return (
+            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
+            f' {self.BRANCH}{git.branch}{self.R}'
+        )
+
     def model_colour(self, model_name: str) -> str:
         m = model_name.lower()
         if 'opus' in m:
@@ -894,6 +903,48 @@ class Renderer:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
             line += f' {self.LABEL}| 7d: {seven_clr}{seven_day.used_percentage}%{self.R}'
         return line
+
+    def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int) -> str:
+        model_clr = self.model_colour(model_name)
+        pct       = rate_limits.five_hour.used_percentage or 0
+        pct_clr   = self.fill_colour(float(pct))
+        step      = rainbow_step()
+        c_helper  = rainbow_at(step, 9)
+        rate_pct  = f'{pct_clr}{pct}%{self.R}'
+
+        rate_with_time = None
+        try:
+            if rate_limits.five_hour.resets_at:
+                resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
+                delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+                if delta.total_seconds() > 0:
+                    total_s = int(delta.total_seconds())
+                    h, rem  = divmod(total_s, 3600)
+                    m       = rem // 60
+                    time_str       = f'{h}h{m}m' if h else f'{m}m'
+                    rate_with_time = f'{rate_pct} {self.COMMIT}{time_str}{self.R}'
+        except Exception:
+            pass
+
+        def _build(name: str, rate: str) -> str:
+            return (
+                f'{model_clr}󰢹  {name}{self.R}'
+                f' {self.LABEL}|{self.R}'
+                f' {c_helper}{BOLD}{self.R} {rate}'
+            )
+
+        if rate_with_time:
+            line = _build(model_name, rate_with_time)
+            if _visible_width(line) <= max_width:
+                return line
+
+        line = _build(model_name, rate_pct)
+        if _visible_width(line) <= max_width:
+            return line
+
+        base_w      = _visible_width(_build('', rate_pct))
+        name_budget = max(3, max_width - base_w - 1)
+        return _build(model_name[:name_budget] + '…', rate_pct)
 
     def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
         step = rainbow_step()
@@ -1086,6 +1137,29 @@ class Renderer:
         bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
+
+    def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
+        total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
+        fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
+        pct_soft     = total_tokens / SOFT_LIMIT * 100
+
+        if total_tokens >= SOFT_LIMIT:
+            a      = BOLD + CLR_ALERT
+            prefix = f'{a}{pct_soft:.0f}%{self.R} '
+            bar_w  = max(4, available - _visible_width(prefix) - 3)
+            filled = int(min(fill_ratio, 1.0) * bar_w)
+            empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
+            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
+            return f' {prefix}{bar}'
+
+        bar_clr = self.fill_colour(pct_soft)
+        prefix  = f'{bar_clr}{BOLD}{pct_soft:.0f}%{self.R} '
+        bar_w   = max(4, available - _visible_width(prefix) - 3)
+        filled  = int(fill_ratio * bar_w)
+        empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
+        bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        return f' {prefix}{bar}'
+
     SPEC_GRADIENTS = [
         ((30, 80, 180), (80, 220, 240)),      # Ocean
         ((220, 100, 20), (240, 60, 150)),      # Sunset
@@ -1156,52 +1230,87 @@ class Renderer:
             return f'{e.__class__.__name__}, {str(e)}'
 
 def main() -> None:
-    info = json.loads(sys.stdin.read())
+    info    = json.loads(sys.stdin.read())
     session = SessionInfo.from_dict(info)
-    r = Renderer()
+    r       = Renderer()
 
-    skills = LoadedSkills.from_transcript(session.transcript_path)
-    skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
-    token_log = session.token_log
+    raw_tw = terminal_width()
+    if raw_tw < MIN_WIDTH:
+        return
 
-    width = max(MIN_WIDTH, min(MAX_WIDTH, terminal_width() - 6))
+    width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
 
-    git = GitInfo.from_cwd(session.cwd)
-    line_path = r.path_git(session.short_pwd, git, session.elapsed)
-    line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
-    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, session.session_id, width)
-    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
-    changes = OpenSpec.from_cwd(session.cwd).changes
-    title_cap = max(10, width - 45)
-    title_w = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
-    openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
-
-    ctx = session.context_window
+    ctx          = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
-    fill = min(total_tokens / SOFT_LIMIT, 1.0)
+    fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
-    line_context = r.context_line(ctx, width - 3)
+    if width < NARROW_WIDTH:
+        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3)
+        line_context = r.context_line_compact(ctx, width - 3)
+        lines = [
+            r.border_top(width, session.session_id, fill=fill),
+            r.border_line(line_model, width, fill=fill),
+            r.border_separator_dim(width, fill=fill),
+            r.border_line(line_context, width, fill=fill),
+            r.border_bottom(width, fill=fill),
+        ]
 
-    lines = [
-        r.border_top(width, session.session_id, fill=fill),
-        r.border_line(line_path, width, fill=fill),
-        r.border_line(line_model, width, fill=fill),
-    ]
-    if plugins_line:
-        lines.append(r.border_separator_dim(width, fill=fill))
-        lines.append(r.border_line(plugins_line, width, fill=fill))
-    lines.append(r.border_separator_dim(width, fill=fill))
-    lines.append(r.border_line(line_context, width, fill=fill))
-    lines.append(r.border_separator_dim(width, downs=vsep_cols, fill=fill))
-    for lt in line_tokens:
-        lines.append(r.border_line(lt, width, fill=fill))
-    if openspec_bars:
-        lines.append(r.border_separator(width, ups=vsep_cols, fill=fill))
-        for bar in openspec_bars:
-            lines.append(r.border_line(bar, width, fill=fill))
-        lines.append(r.border_bottom(width, fill=fill))
+    elif width < MEDIUM_WIDTH:
+        git          = GitInfo.from_cwd(session.cwd)
+        line_path    = r.path_git_compact(session.short_pwd, git)
+        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3)
+        line_context = r.context_line_compact(ctx, width - 3)
+        lines = [
+            r.border_top(width, session.session_id, fill=fill),
+            r.border_line(line_path, width, fill=fill),
+            r.border_line(line_model, width, fill=fill),
+            r.border_separator_dim(width, fill=fill),
+            r.border_line(line_context, width, fill=fill),
+            r.border_bottom(width, fill=fill),
+        ]
+
     else:
-        lines.append(r.border_bottom(width, ups=vsep_cols, fill=fill))
+        skills        = LoadedSkills.from_transcript(session.transcript_path)
+        skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
+        token_log     = session.token_log
+
+        git          = GitInfo.from_cwd(session.cwd)
+        line_path    = r.path_git(session.short_pwd, git, session.elapsed)
+        line_model   = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
+        line_tokens, vsep_cols = r.tokens_cost(
+            session.total_in, session.cache_read, session.total_out,
+            token_log.day_in, token_log.day_cache_read, token_log.day_out,
+            session.session_cost, session.day_cost, session.token_rate,
+            session.session_id, width,
+        )
+        plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+        changes      = OpenSpec.from_cwd(session.cwd).changes
+        title_cap    = max(10, width - 45)
+        title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
+        openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
+
+        line_context = r.context_line(ctx, width - 3)
+
+        lines = [
+            r.border_top(width, session.session_id, fill=fill),
+            r.border_line(line_path, width, fill=fill),
+            r.border_line(line_model, width, fill=fill),
+        ]
+        if plugins_line:
+            lines.append(r.border_separator_dim(width, fill=fill))
+            lines.append(r.border_line(plugins_line, width, fill=fill))
+        lines.append(r.border_separator_dim(width, fill=fill))
+        lines.append(r.border_line(line_context, width, fill=fill))
+        lines.append(r.border_separator_dim(width, downs=vsep_cols, fill=fill))
+        for lt in line_tokens:
+            lines.append(r.border_line(lt, width, fill=fill))
+        if openspec_bars:
+            lines.append(r.border_separator(width, ups=vsep_cols, fill=fill))
+            for bar in openspec_bars:
+                lines.append(r.border_line(bar, width, fill=fill))
+            lines.append(r.border_bottom(width, fill=fill))
+        else:
+            lines.append(r.border_bottom(width, ups=vsep_cols, fill=fill))
 
     sys.stdout.write('\n'.join(lines))
 
