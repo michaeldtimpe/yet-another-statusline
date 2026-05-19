@@ -198,6 +198,7 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = 60
 
 
 def main() -> int:
+    os.system('clear -x')
     fixture = json.loads(FIXTURE_PATH.read_text())
     session_id = fixture['session_id']
 

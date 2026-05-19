@@ -343,6 +343,14 @@ if [[ "$day_cost" != "$session_cost" ]]; then
 fi
 
 # ── Line 4+: openspec bars (coloured, one per change) ────────────────────────
+# Gradient start/end RGB for each bar (cycles through 10)
+spec_grad_r0=(30 220 20 100 180 40 140 160 20 60)
+spec_grad_g0=(80 100 140 40 30 100 70 20 130 20)
+spec_grad_b0=(180 20 60 200 30 160 20 60 120 140)
+spec_grad_r1=(80 240 160 200 255 200 240 255 100 220)
+spec_grad_g1=(220 60 240 140 200 230 190 140 240 60)
+spec_grad_b1=(240 150 40 255 40 255 60 180 180 200)
+
 openspec_lines=""
 for idx in "${!openspec_names[@]}"; do
   name="${openspec_names[$idx]}"
@@ -350,14 +358,30 @@ for idx in "${!openspec_names[@]}"; do
   t="${openspec_total[$idx]}"
   bar_width=30
   filled=$(( d * bar_width / t ))
-  bar_filled=""; bar_empty=""
-  for (( i=0; i<bar_width; i++ )); do
-    (( i < filled )) && bar_filled+="█" || bar_empty+="░"
+  empty=$(( bar_width - filled ))
+  gi=$(( idx % 10 ))
+  r0=${spec_grad_r0[$gi]}; g0=${spec_grad_g0[$gi]}; b0=${spec_grad_b0[$gi]}
+  r1=${spec_grad_r1[$gi]}; g1=${spec_grad_g1[$gi]}; b1=${spec_grad_b1[$gi]}
+  bar_filled=""
+  denom=$(( filled > 1 ? filled - 1 : 1 ))
+  for (( i=0; i<filled; i++ )); do
+    r=$(( r0 + (r1 - r0) * i / denom ))
+    g=$(( g0 + (g1 - g0) * i / denom ))
+    b=$(( b0 + (b1 - b0) * i / denom ))
+    bar_filled+="\033[38;2;${r};${g};${b}m▓"
   done
+  if (( filled > 0 && empty > 0 )); then
+    bar_filled+="\033[38;2;${r1};${g1};${b1}m▒"
+    bar_empty=""
+    for (( i=0; i<empty-1; i++ )); do bar_empty+="░"; done
+  else
+    bar_empty=""
+    for (( i=0; i<empty; i++ )); do bar_empty+="░"; done
+  fi
   pct=$(( d * 100 / t ))
   ratio=$(printf "%d/%d" "$d" "$t")
   pct_str=$(printf "%3d" "$pct")
-  line="${c_bar_fill}${bar_filled}${c_reset}"
+  line="${bar_filled}${c_reset}"
   line+="${c_bar_empty}${bar_empty}${c_reset}"
   line+=" ${c_label}${ratio}${c_reset} \033[1m${pct_str}%\033[0m"
   line+=" ${c_label}${name}${c_reset}"

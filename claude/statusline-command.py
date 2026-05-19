@@ -15,6 +15,13 @@ from pathlib import Path
 from typing import NamedTuple
 
 
+class BarChars:
+    FILLED = '█'
+    HEAVY  = '▆'
+    MID    = ''
+    EMPTY  = '░'
+
+
 HOME       = Path(os.path.expanduser('~'))
 MIN_WIDTH  = 80
 MAX_WIDTH  = 160
@@ -962,8 +969,8 @@ class Renderer:
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
         filled = int(ratio * 30)
-        bar_filled = '▰' * filled
-        bar_empty = '▱' * (30 - filled)
+        bar_filled = BarChars.FILLED * filled
+        bar_empty = BarChars.EMPTY * (30 - filled)
         if ratio >= 0.9:
             color = CLR_ALERT
         elif ratio >= 0.7:
@@ -1021,7 +1028,12 @@ class Renderer:
         if filled <= 0 or bar_w <= 0:
             return ''
         denom = max(1, bar_w - 1)
-        return ''.join(f'{self.gradient_color(i / denom)}▰' for i in range(filled))
+        parts = []
+        for i in range(filled):
+            parts.append(f'{self.gradient_color(i / denom)}{BarChars.FILLED}')
+        if filled <= bar_w:
+            parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
+        return ''.join(parts)
 
     def context_bar_color(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -1046,7 +1058,8 @@ class Renderer:
             prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
-            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{"▱" * (bar_w - filled)}{self.R}'
+            empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
+            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
             return f'{a}{self.R} {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -1057,10 +1070,38 @@ class Renderer:
         prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
-        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{"▱" * (bar_w - filled)}{self.R}'
+        empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
+        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
-    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25) -> str:
+    SPEC_GRADIENTS = [
+        ((30, 80, 180), (80, 220, 240)),      # Ocean
+        ((220, 100, 20), (240, 60, 150)),      # Sunset
+        ((20, 140, 60), (160, 240, 40)),       # Forest
+        ((100, 40, 200), (200, 140, 255)),     # Lavender
+        ((180, 30, 30), (255, 200, 40)),       # Ember
+        ((40, 100, 160), (200, 230, 255)),     # Arctic
+        ((140, 70, 20), (240, 190, 60)),       # Copper
+        ((160, 20, 60), (255, 140, 180)),      # Rose
+        ((20, 130, 120), (100, 240, 180)),     # Mint
+        ((60, 20, 140), (220, 60, 200)),       # Nebula
+    ]
+
+    def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
+        if filled <= 0:
+            return ''
+        c0, c1 = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        denom = max(1, filled - 1)
+        parts = []
+        for i in range(filled):
+            t = i / denom if denom > 0 else 0.0
+            r = int(c0[0] + (c1[0] - c0[0]) * t)
+            g = int(c0[1] + (c1[1] - c0[1]) * t)
+            b = int(c0[2] + (c1[2] - c0[2]) * t)
+            parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
+        return ''.join(parts)
+
+    def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25, idx: int = 0) -> str:
         pct = done * 100 // total
         if len(name) > title_w:
             title = name[:max(1, title_w - 3)] + '...'
@@ -1069,11 +1110,19 @@ class Renderer:
         suffix_visible = 7 + len(str(done)) + len(str(total))
         bar_w = max(4, (box_width - 3) - (title_w + 1) - suffix_visible)
         filled = done * bar_w // total
-        bar_filled, bar_empty = '▰' * filled, '▱' * (bar_w - filled)
+        empty = bar_w - filled
+
+        bar_filled = self.spec_gradient_bar(filled, bar_w, idx)
+        if filled > 0 and empty > 0:
+            c0, c1 = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+            r, g, b = int(c1[0] * 0.45), int(c1[1] * 0.45), int(c1[2] * 0.45)
+            bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
+            empty -= 1
+        bar_empty = f'\033[38;5;233m{BarChars.HEAVY * empty}\033[0m'
 
         return (
             f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
-            f'{self.BAR_FILL}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
+            f'{bar_filled}{self.R}{bar_empty}'
             f' {self.LABEL}{done}/{total}{self.R} {BOLD}{pct:>3d}%{RESET}'
         )
 
@@ -1114,7 +1163,7 @@ def main() -> None:
     changes = OpenSpec.from_cwd(session.cwd).changes
     title_cap = max(10, width - 45)
     title_w = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
-    openspec_bars = [r.openspec_bar(name, d, t, width, title_w) for name, d, t in changes]
+    openspec_bars = [r.openspec_bar(name, d, t, width, title_w, i) for i, (name, d, t) in enumerate(changes)]
 
     ctx = session.context_window
     total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
