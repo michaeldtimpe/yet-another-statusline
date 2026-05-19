@@ -157,7 +157,9 @@ def render_once(env: dict, payload: str) -> str:
 DEMO_STEPS = 60
 DEMO_DELAY = 0.10
 DEMO_DURATION = DEMO_STEPS * DEMO_DELAY  # real seconds the demo runs
-DEMO_TOKEN_WINDOW = DEMO_DURATION * 1.2  # window slightly wider than demo so first bars are visible
+# history() uses window = WINDOW * 2, so set WINDOW = DEMO_DURATION / 2 so bars travel
+# the full graph width over the course of the demo
+DEMO_TOKEN_WINDOW = DEMO_DURATION / 2
 
 
 def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DEMO_STEPS, delay: float = DEMO_DELAY) -> None:
@@ -174,17 +176,6 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
 
     rng = random.Random(42)
     KEEP = max(300.0, DEMO_TOKEN_WINDOW * 4)
-
-    graph_window = DEMO_TOKEN_WINDOW * 2
-    now0 = time.time()
-    seed_entries: list[str] = []
-    for j in range(61):
-        t = now0 - graph_window + (graph_window * j / 60)
-        progress = j / 60
-        hist_in = int(150_000 * progress * 1.05 * 1.18) + int(rng.random() * 800)
-        hist_out = int(7_500 * progress + 120) + int(rng.random() * 200)
-        seed_entries.append(f'{t:.3f} {session_id} {hist_in} {hist_out}')
-    rate_log.write_text('\n'.join(seed_entries) + '\n')
 
     sys.stdout.write('\n\n')
     last_lines = 0
