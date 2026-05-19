@@ -637,6 +637,50 @@ class LoadedSkills:
 
 
 @dataclass
+class RunningSubagents:
+    subagents: list[tuple[str, str]] = field(default_factory=list)  # (agentType, description)
+
+    STALE_SECONDS = 30
+
+    @classmethod
+    def from_session(cls, session_id: str, project_dir: str) -> RunningSubagents:
+        if not session_id or not project_dir:
+            return cls()
+        project_slug = project_dir.replace('/', '-')
+        if project_slug.startswith('-'):
+            project_slug = project_slug[1:]
+        subagents_dir = HOME / '.claude' / 'projects' / f'-{project_slug}' / session_id / 'subagents'
+        if not subagents_dir.is_dir():
+            return cls()
+        now = time.time()
+        subagents: list[tuple[str, str]] = []
+        try:
+            for meta in subagents_dir.glob('*.meta.json'):
+                agent_type = ''
+                description = ''
+                try:
+                    data = json.loads(meta.read_text())
+                    agent_type = data.get('agentType', '')
+                    description = data.get('description', '')
+                except Exception:
+                    continue
+
+                jsonl = meta.with_suffix('').with_suffix('.jsonl')
+                if not jsonl.is_file():
+                    continue
+                try:
+                    mtime = jsonl.stat().st_mtime
+                    if now - mtime > cls.STALE_SECONDS:
+                        continue
+                except OSError:
+                    continue
+                subagents.append((agent_type, description))
+        except OSError:
+            pass
+        return cls(subagents=subagents)
+
+
+@dataclass
 class TranscriptUsage:
     input_tokens: int = 0
     cache_creation_input_tokens: int = 0
@@ -769,6 +813,12 @@ def rainbow_at(step: int, offset: int = 0) -> str:
 def rainbow_color() -> str:
     return rainbow_at(rainbow_step())
 
+
+def _short_agent_name(agent_type: str, description: str) -> str:
+    if agent_type.lower() in ('general-purpose', 'explore', 'plan'):
+        parts = description.split(' - ', 1)
+        return parts[0] if len(parts) > 1 else description[:20]
+    return agent_type.replace('-executor', '')
 
 class Renderer:
     R         = RESET
@@ -952,15 +1002,19 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
-    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
+    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str, subagents: list[tuple[str, str]] | None = None) -> str:
         step = rainbow_step()
         c_skills = rainbow_at(step, 3)
         c_plugins = rainbow_at(step, 6)
+        c_subagent = rainbow_at(step, 12)
         extras = []
         if skills_count > 0:
             extras.append(f'{c_skills}{BOLD}󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
             extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
+        if subagents:
+            names = ','.join((_short_agent_name(t, d)) for t, d in executors)
+            extras.append(f'{c_subagent}{BOLD}  {self.R}{CLR_PEACH}{names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
@@ -1291,6 +1345,7 @@ def main() -> None:
         skills        = LoadedSkills.from_transcript(session.transcript_path)
         skill_display = ','.join(s.split(':', 1)[-1] for s in skills.names)
         token_log     = session.token_log
+        subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
 
         git          = GitInfo.from_cwd(session.cwd)
         line_path    = r.path_git(session.short_pwd, git, session.elapsed)
@@ -1301,7 +1356,7 @@ def main() -> None:
             session.session_cost, session.day_cost, session.token_rate,
             session.session_id, width,
         )
-        plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
+        plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, subagents.subagents or None)
         changes      = OpenSpec.from_cwd(session.cwd).changes
         title_cap    = max(10, width - 45)
         title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
