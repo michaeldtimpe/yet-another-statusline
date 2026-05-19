@@ -1049,10 +1049,14 @@ class Renderer:
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
 
     GRAD_STOPS = (
-        (0.00, ( 40, 200,  80)),
-        (0.50, (240, 220,  40)),
-        (0.75, (240, 140,  30)),
-        (1.00, (220,  40,  40)),
+        (0.00, ( 40, 210,  80)),  # bright green
+        (0.25, ( 80, 230,  40)),  # lime
+        (0.45, (180, 240,  20)),  # yellow-green
+        (0.55, (240, 230,  20)),  # yellow
+        (0.68, (255, 170,  15)),  # amber
+        (0.78, (250, 100,  20)),  # orange
+        (0.88, (235,  55,  35)),  # red-orange
+        (1.00, (210,  20,  50)),  # crimson
     )
     GREY_RGB = (108, 108, 108)  # matches xterm 242
     FADE     = 0.06
@@ -1167,29 +1171,37 @@ class Renderer:
         return f' {prefix}{bar}'
 
     SPEC_GRADIENTS = [
-        ((30, 80, 180), (80, 220, 240)),      # Ocean
-        ((220, 100, 20), (240, 60, 150)),      # Sunset
-        ((20, 140, 60), (160, 240, 40)),       # Forest
-        ((100, 40, 200), (200, 140, 255)),     # Lavender
-        ((180, 30, 30), (255, 200, 40)),       # Ember
-        ((40, 100, 160), (200, 230, 255)),     # Arctic
-        ((140, 70, 20), (240, 190, 60)),       # Copper
-        ((160, 20, 60), (255, 140, 180)),      # Rose
-        ((20, 130, 120), (100, 240, 180)),     # Mint
-        ((60, 20, 140), (220, 60, 200)),       # Nebula
+        ((20, 60, 200), (20, 180, 240), (100, 240, 255)),       # Ocean
+        ((200, 80, 10), (245, 30, 100), (255, 160, 80)),        # Sunset
+        ((10, 120, 40), (80, 210, 20), (200, 255, 60)),         # Forest
+        ((80, 20, 200), (160, 60, 255), (220, 160, 255)),       # Lavender
+        ((160, 20, 10), (240, 120, 10), (255, 220, 30)),        # Ember
+        ((20, 80, 160), (60, 180, 240), (210, 240, 255)),       # Arctic
+        ((120, 50, 10), (200, 120, 20), (255, 200, 80)),        # Copper
+        ((160, 10, 50), (240, 60, 130), (255, 180, 210)),       # Rose
+        ((10, 110, 90), (20, 210, 150), (120, 255, 200)),       # Mint
+        ((50, 10, 160), (180, 20, 220), (255, 100, 240)),       # Nebula
+        ((140, 10, 180), (40, 100, 255), (20, 220, 200)),       # Aurora
+        ((200, 160, 10), (240, 80, 20), (180, 20, 80)),         # Volcano
     ]
 
     def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
         if filled <= 0:
             return ''
-        c0, c1 = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        stops = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        n = len(stops)
         denom = max(1, filled - 1)
         parts = []
         for i in range(filled):
             t = i / denom if denom > 0 else 0.0
-            r = int(c0[0] + (c1[0] - c0[0]) * t)
-            g = int(c0[1] + (c1[1] - c0[1]) * t)
-            b = int(c0[2] + (c1[2] - c0[2]) * t)
+            seg = t * (n - 1)
+            s0 = min(int(seg), n - 2)
+            s1 = s0 + 1
+            u = seg - s0
+            c0, c1 = stops[s0], stops[s1]
+            r = int(c0[0] + (c1[0] - c0[0]) * u)
+            g = int(c0[1] + (c1[1] - c0[1]) * u)
+            b = int(c0[2] + (c1[2] - c0[2]) * u)
             parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
         return ''.join(parts)
 
@@ -1206,8 +1218,8 @@ class Renderer:
 
         bar_filled = self.spec_gradient_bar(filled, bar_w, idx)
         if filled > 0 and empty > 0:
-            c0, c1 = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
-            r, g, b = int(c1[0] * 0.45), int(c1[1] * 0.45), int(c1[2] * 0.45)
+            c_last = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)][-1]
+            r, g, b = int(c_last[0] * 0.45), int(c_last[1] * 0.45), int(c_last[2] * 0.45)
             bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
             empty -= 1
         bar_empty = f'\033[38;5;233m{BarChars.HEAVY * empty}\033[0m'
