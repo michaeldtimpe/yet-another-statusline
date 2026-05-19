@@ -14,8 +14,8 @@ def test_path_git_clean_no_elapsed():
     assert '~/proj' in stripped
     assert 'main' in stripped
     assert 'abc1234' in stripped
-    assert '✹' not in stripped
-    assert '✭' not in stripped
+    assert '●' not in stripped
+    assert '*' not in stripped
     assert '[' not in stripped
 
 
@@ -24,8 +24,8 @@ def test_path_git_dirty_with_elapsed():
     git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=1)
     out = r.path_git('~/proj', git, '12m')
     stripped = strip_ansi(out)
-    assert '✹ 3' in stripped
-    assert '✭ 1' in stripped
+    assert '●3' in stripped
+    assert '*1' in stripped
     assert '[12m]' in stripped
 
 
@@ -45,5 +45,5 @@ def test_path_git_compact_no_commit_no_dirty():
     assert '~/proj' in stripped
     assert 'main' in stripped
     assert 'abc1234' not in stripped
-    assert '✹' not in stripped
-    assert '✭' not in stripped
+    assert '●' not in stripped
+    assert '*' not in stripped

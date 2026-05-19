@@ -92,6 +92,12 @@ CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
 
+# Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
+# chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
+# terminal.
+ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
+ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
+
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
@@ -346,7 +352,8 @@ class SessionInfo:
 
     @property
     def model_name(self) -> str:
-        return self.model.display_name or self.model.id or 'unknown'
+        name = self.model.display_name or self.model.id or 'unknown'
+        return name.replace('(1M context)', '1M').replace('  ', ' ').strip()
 
     @property
     def model_thinking(self) -> str:
@@ -913,9 +920,11 @@ class Renderer:
     def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
         dirty = ''
         if git.modified > 0:
-            dirty += f' {CLR_WARN}✹ {git.modified}{RESET}'
+            dirty += f'{CLR_WARN}●{git.modified}{RESET}'
         if git.untracked > 0:
-            dirty += f' {CLR_WARN}✭ {git.untracked}{RESET}'
+            dirty += f'{CLR_WARN}*{git.untracked}{RESET}'
+        if dirty:
+            dirty = ' ' + dirty
         tail = f' {self.SESSION}[{elapsed}]{self.R}' if (elapsed and elapsed != '0m') else ''
 
         return (
@@ -969,18 +978,20 @@ class Renderer:
             return CLR_YELLOW
         return CLR_GREEN_OK
 
-    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits) -> str:
+    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits) -> tuple[str, int]:
         step = rainbow_step()
         c_think = rainbow_at(step, 0)
         c_helper = rainbow_at(step, 9)
         model_clr = self.model_colour(model_name)
         line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
-        line += f' |{self.R} {c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        left_w = _visible_width(line)
+        vsep = f'  {self.BORDER}│{self.R}  '
+        line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            line += f' {self.LABEL}| 7d: {seven_clr}{seven_day.used_percentage}%{self.R}'
-        return line
+            line += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
+        return line, left_w + 2
 
     def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int) -> str:
         model_clr = self.model_colour(model_name)
@@ -1081,9 +1092,8 @@ class Renderer:
         cost1 = f'${sess_cost:,.2f}'
         cost2 = f'${day_cost:,.2f}'
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
-        cost_icon = f''
 
-        end1 = f'{CLR_GREEN_OK} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end1 = f'{CLR_GREEN_OK}{ICON_COST} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
         end2 = f'   {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
         w_middle = _visible_width(middle1)
@@ -1091,7 +1101,7 @@ class Renderer:
         content_w = box_width - 3
         leader_w = max(11, content_w - w_middle - w_end - vsep_w * 2)
 
-        rate_label = f'{CLR_YELLOW_BRT}󱢧  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE}  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
         pad_left = max(0, (leader_w - rate_label_w) // 2)
         pad_right = max(0, leader_w - rate_label_w - pad_left)
@@ -1099,16 +1109,16 @@ class Renderer:
 
         if session_id:
             spark_history = TokenRate.history(session_id, leader_w, TokenRate.WINDOW * 2)
-            leader2 = self.sparkline(spark_history)
+            leader2 = self.sparkline(spark_history[::-1])
         else:
             leader2 = ' ' * leader_w
 
-        col1 = leader_w + vsep_w
-        col2 = leader_w + w_middle + vsep_w * 2
+        col1 = w_middle + vsep_w
+        col2 = w_middle + w_end + vsep_w * 2
 
         return [
-            f'{leader1}{vsep}{middle1}{vsep}{end1}',
-            f'{leader2}{vsep}{middle2}{vsep}{end2}',
+            f'{middle1}{vsep}{end1}{vsep}{leader1}',
+            f'{middle2}{vsep}{end2}{vsep}{leader2}',
         ], (col1, col2)
 
     def context_bar(self, fill_ratio: float) -> str:
@@ -1382,7 +1392,7 @@ def main() -> None:
 
         git          = GitInfo.from_cwd(session.cwd)
         line_path    = r.path_git(session.short_pwd, git, session.elapsed)
-        line_model   = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
+        line_model, model_div_offset = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
         line_tokens, vsep_cols = r.tokens_cost(
             session.total_in, session.cache_read, session.total_out,
             token_log.day_in, token_log.day_cache_read, token_log.day_out,
@@ -1400,18 +1410,20 @@ def main() -> None:
         combined = r.path_model_row(line_path, line_model, width)
         if combined is not None:
             combined_line, top_div_col = combined
+            model_div_col = top_div_col + 3 + model_div_offset
             lines = [
-                r.border_top(width, session.session_id, downs=(top_div_col,), fill=fill),
+                r.border_top(width, session.session_id, downs=(top_div_col, model_div_col), fill=fill),
                 r.border_line(combined_line, width, fill=fill),
             ]
-            next_ups: tuple[int, ...] = (top_div_col,)
+            next_ups: tuple[int, ...] = (top_div_col, model_div_col)
         else:
+            model_div_col = 3 + model_div_offset
             lines = [
                 r.border_top(width, session.session_id, fill=fill),
                 r.border_line(line_path, width, fill=fill),
                 r.border_line(line_model, width, fill=fill),
             ]
-            next_ups = ()
+            next_ups = (model_div_col,)
         if plugins_line:
             lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
             lines.append(r.border_line(plugins_line, width, fill=fill))
