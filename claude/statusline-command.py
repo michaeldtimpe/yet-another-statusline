@@ -848,20 +848,23 @@ class Renderer:
     SONNET    = CLR_GREEN_OK
     HAIKU     = CLR_SKY_BLUE
 
-    def border_top(self, width: int, session_id: str = '', fill: float = 1.0) -> str:
+    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
+        downs_set = set(downs)
+        def _ch(col: int) -> str:
+            return '┬' if col in downs_set else '─'
         parts = [self.grad_at(0, width, fill=fill), '╭']
         if session_id:
             avail = max(0, width - 4)
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
             sid_w = _visible_width(sid)
-            parts += [self.grad_at(1, width, fill=fill), '─', self.grad_at(2, width, fill=fill), '─', self.SESSION, sid]
+            parts += [self.grad_at(1, width, fill=fill), _ch(2), self.grad_at(2, width, fill=fill), _ch(3), self.SESSION, sid]
             offset = 3 + sid_w
             rest = max(0, width - 4 - sid_w)
             for i in range(rest):
-                parts += [self.grad_at(offset + i, width, fill=fill), '─']
+                parts += [self.grad_at(offset + i, width, fill=fill), _ch(offset + i + 1)]
         else:
             for i in range(1, width - 1):
-                parts += [self.grad_at(i, width, fill=fill), '─']
+                parts += [self.grad_at(i, width, fill=fill), _ch(i + 1)]
         parts += [self.grad_at(width - 1, width, fill=fill), '╮', self.R]
         return ''.join(parts)
 
@@ -883,12 +886,20 @@ class Renderer:
         parts += [self.grad_at(width - 1, width, fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
         downs_set = set(downs)
+        ups_set = set(ups)
         parts = [self.grad_at(0, width, 0.6, fill=fill), '├']
         for i in range(width - 2):
             col = i + 2
-            ch = '┬' if col in downs_set else '┄'
+            if col in downs_set and col in ups_set:
+                ch = '┼'
+            elif col in downs_set:
+                ch = '┬'
+            elif col in ups_set:
+                ch = '┴'
+            else:
+                ch = '┄'
             parts += [self.grad_at(i + 1, width, 0.6, fill=fill), ch]
         parts += [self.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
         return ''.join(parts)
@@ -915,6 +926,17 @@ class Renderer:
             f'{self.COMMIT}{git.commit}{self.R}'
             f'{dirty}{tail}'
         )
+
+    def path_model_row(self, left: str, right: str, box_width: int) -> tuple[str, int] | None:
+        vsep = f'  {self.BORDER}│{self.R}  '
+        vsep_w = 5
+        left_w = _visible_width(left)
+        right_w = _visible_width(right)
+        content_w = box_width - 3
+        if left_w + vsep_w + right_w > content_w:
+            return None
+        div_col = 3 + left_w + 2
+        return f'{left}{vsep}{right}', div_col
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
@@ -1332,14 +1354,25 @@ def main() -> None:
         line_path    = r.path_git_compact(session.short_pwd, git)
         line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3)
         line_context = r.context_line_compact(ctx, width - 3)
-        lines = [
-            r.border_top(width, session.session_id, fill=fill),
-            r.border_line(line_path, width, fill=fill),
-            r.border_line(line_model, width, fill=fill),
-            r.border_separator_dim(width, fill=fill),
-            r.border_line(line_context, width, fill=fill),
-            r.border_bottom(width, fill=fill),
-        ]
+        combined = r.path_model_row(line_path, line_model, width)
+        if combined is not None:
+            combined_line, div_col = combined
+            lines = [
+                r.border_top(width, session.session_id, downs=(div_col,), fill=fill),
+                r.border_line(combined_line, width, fill=fill),
+                r.border_separator_dim(width, ups=(div_col,), fill=fill),
+                r.border_line(line_context, width, fill=fill),
+                r.border_bottom(width, fill=fill),
+            ]
+        else:
+            lines = [
+                r.border_top(width, session.session_id, fill=fill),
+                r.border_line(line_path, width, fill=fill),
+                r.border_line(line_model, width, fill=fill),
+                r.border_separator_dim(width, fill=fill),
+                r.border_line(line_context, width, fill=fill),
+                r.border_bottom(width, fill=fill),
+            ]
 
     else:
         skills        = LoadedSkills.from_transcript(session.transcript_path)
@@ -1364,15 +1397,26 @@ def main() -> None:
 
         line_context = r.context_line(ctx, width - 3)
 
-        lines = [
-            r.border_top(width, session.session_id, fill=fill),
-            r.border_line(line_path, width, fill=fill),
-            r.border_line(line_model, width, fill=fill),
-        ]
+        combined = r.path_model_row(line_path, line_model, width)
+        if combined is not None:
+            combined_line, top_div_col = combined
+            lines = [
+                r.border_top(width, session.session_id, downs=(top_div_col,), fill=fill),
+                r.border_line(combined_line, width, fill=fill),
+            ]
+            next_ups: tuple[int, ...] = (top_div_col,)
+        else:
+            lines = [
+                r.border_top(width, session.session_id, fill=fill),
+                r.border_line(line_path, width, fill=fill),
+                r.border_line(line_model, width, fill=fill),
+            ]
+            next_ups = ()
         if plugins_line:
-            lines.append(r.border_separator_dim(width, fill=fill))
+            lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
             lines.append(r.border_line(plugins_line, width, fill=fill))
-        lines.append(r.border_separator_dim(width, fill=fill))
+            next_ups = ()
+        lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
         lines.append(r.border_line(line_context, width, fill=fill))
         lines.append(r.border_separator_dim(width, downs=vsep_cols, fill=fill))
         for lt in line_tokens:

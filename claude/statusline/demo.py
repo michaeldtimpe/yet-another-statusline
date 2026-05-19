@@ -55,12 +55,38 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     project = tmpdir / 'my-project'
 
     (claude / 'projects' / session_id).mkdir(parents=True)
-    (project / '.git' / 'refs' / 'heads').mkdir(parents=True)
+    (project / 'src').mkdir(parents=True)
     (project / 'openspec' / 'changes' / 'add-skills-row').mkdir(parents=True)
     (project / 'openspec' / 'changes' / 'port-statusline-to-python').mkdir(parents=True)
 
-    (project / '.git' / 'HEAD').write_text('ref: refs/heads/demo\n')
-    (project / '.git' / 'refs' / 'heads' / 'demo').write_text('3219308b1c0d4f5a8e7b6c9d2f0a1e3b4c5d6e7f\n')
+    (project / 'README.md').write_text('# my-project\n')
+    (project / 'src' / 'main.py').write_text("print('hi')\n")
+    (project / 'src' / 'utils.py').write_text("def add(a, b):\n    return a + b\n")
+
+    git_env = {
+        'GIT_AUTHOR_NAME':     'Demo',
+        'GIT_AUTHOR_EMAIL':    'demo@example.com',
+        'GIT_COMMITTER_NAME':  'Demo',
+        'GIT_COMMITTER_EMAIL': 'demo@example.com',
+        'HOME':                str(tmpdir),
+        'PATH':                os.environ.get('PATH', ''),
+    }
+    def _git(*args: str) -> None:
+        subprocess.run(['git', '-C', str(project), *args], env=git_env, check=True, capture_output=True)
+
+    _git('init', '-q', '-b', 'demo')
+    _git('add', 'README.md', 'src/main.py', 'src/utils.py')
+    _git('commit', '-q', '-m', 'initial')
+
+    (project / 'src' / 'main.py').write_text("print('hi, world')\n")
+    (project / 'src' / 'utils.py').write_text("def add(a, b):\n    return a + b + 0\n")
+    (project / 'README.md').write_text('# my-project\n\nDemo.\n')
+    (project / 'src' / 'new_feature.py').write_text('# todo\n')
+    (project / 'notes.txt').write_text('scratch\n')
+
+    (project / '.git' / 'refs' / 'heads' / 'demo').write_text(
+        '3219308b1c0d4f5a8e7b6c9d2f0a1e3b4c5d6e7f\n'
+    )
 
     (project / 'openspec' / 'changes' / 'add-skills-row' / 'tasks.md').write_text(
         '- [x] one\n- [x] two\n- [x] three\n- [ ] four\n'
