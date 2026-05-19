@@ -927,7 +927,7 @@ class Renderer:
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, spark_history: list[int] | None = None) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, spark_history: list[int] | None = None, box_width: int = 80) -> str:
         day_clr = self.day_cost_colour(day_cost)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
@@ -939,27 +939,43 @@ class Renderer:
 
         rate_s = fmt_tok(tok_rate).rjust(self.RATE_W)
 
-        leader1 = f'{self.R}{CLR_YELLOW_BRT}󱢧  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
-        leader1_w = _visible_width(leader1)
-        if spark_history:
-            display = spark_history[-leader1_w:] if len(spark_history) > leader1_w else spark_history
-            spark_str = self.sparkline(display)
-            pad = max(0, leader1_w - len(display))
-            leader2 = f'{" " * pad}{spark_str}'
-        else:
-            leader2 = ' ' * leader1_w
         vsep    = f'  {self.BORDER}│{self.R}  '
+        vsep_w  = 5
 
         middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
         middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{day_in_s}{self.R} {self.TOK_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{day_out_s}{self.R}'
 
-        end1 = f'💰  {self.COST}${sess_cost:,.2f}{self.R}'
-        end2 = f'    {self.LABEL}{self.R}{day_clr}${day_cost:,.2f}{self.R}'
+        cost1 = f'${sess_cost:,.2f}'
+        cost2 = f'${day_cost:,.2f}'
+        cost_width = max(_visible_width(cost1), _visible_width(cost2))
+        cost_icon = f''
 
-        w_leader = _visible_width(leader1)
+        end1 = f'{CLR_GREEN_OK} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end2 = f'   {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
+
         w_middle = _visible_width(middle1)
-        col1 = w_leader + 5
-        col2 = w_leader + w_middle + 10
+        w_end    = max(_visible_width(end1), _visible_width(end2))
+        content_w = box_width - 3
+        leader_w = max(11, content_w - w_middle - w_end - vsep_w * 2)
+
+        rate_label = f'{CLR_YELLOW_BRT}󱢧  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label_w = _visible_width(rate_label)
+        pad_left = max(0, (leader_w - rate_label_w) // 2)
+        pad_right = max(0, leader_w - rate_label_w - pad_left)
+        leader1 = f'{" " * pad_left}{rate_label}{" " * pad_right}'
+
+        if spark_history:
+            display = spark_history[-leader_w:] if len(spark_history) > leader_w else spark_history
+            spark_str = self.sparkline(display)
+            pad = max(0, leader_w - len(display))
+            pad_l = pad // 2
+            pad_r = pad - pad_l
+            leader2 = f'{" " * pad_l}{spark_str}{" " * pad_r}'
+        else:
+            leader2 = ' ' * leader_w
+
+        col1 = leader_w + vsep_w
+        col2 = leader_w + w_middle + vsep_w * 2
 
         return [
             f'{leader1}{vsep}{middle1}{vsep}{end1}',
@@ -1158,7 +1174,7 @@ def main() -> None:
     git = GitInfo.from_cwd(session.cwd)
     line_path = r.path_git(session.short_pwd, git, session.elapsed)
     line_model = r.model_section(session.model_name, session.model_thinking, session.rate_limits)
-    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, spark_history)
+    line_tokens, vsep_cols = r.tokens_cost(session.total_in, session.cache_read, session.total_out, token_log.day_in, token_log.day_cache_read, token_log.day_out, session.session_cost, session.day_cost, session.token_rate, spark_history, width)
     plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     changes = OpenSpec.from_cwd(session.cwd).changes
     title_cap = max(10, width - 45)
