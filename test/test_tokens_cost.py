@@ -1,5 +1,6 @@
+from typing import Any
+
 import statusline_command as sl
-from conftest import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
@@ -8,7 +9,7 @@ Renderer = sl.Renderer
 BOX_WIDTH = 80
 
 
-def _call():
+def _call() -> Any:
     r = Renderer()
     return r.tokens_cost(
         sess_in=1, sess_cache=0, sess_out=2,
@@ -18,13 +19,13 @@ def _call():
     )
 
 
-def test_tokens_cost_returns_two_equal_width_lines():
+def test_tokens_cost_returns_two_equal_width_lines() -> None:
     lines, cols = _call()
     assert len(lines) == 2
     assert _visible_width(lines[0]) == _visible_width(lines[1])
 
 
-def test_tokens_cost_cols_within_box():
+def test_tokens_cost_cols_within_box() -> None:
     lines, cols = _call()
     col1, col2 = cols
     assert 1 <= col1

@@ -1,4 +1,8 @@
 """Tests for TokenRate.update and TokenRate.history (disk I/O parsers)."""
+from pathlib import Path
+
+import pytest
+
 import statusline_command as sl
 
 
@@ -10,21 +14,21 @@ class FakeTime:
     _now = NOW
 
     @staticmethod
-    def time():
+    def time() -> float:
         return FakeTime._now
 
 
-def _log_path(tmp_home):
+def _log_path(tmp_home: Path) -> Path:
     return tmp_home / '.claude' / 'statusline-token-rate.log'
 
 
-def _write_row(path, ts, session_id, total_in, total_out):
+def _write_row(path: Path, ts: float, session_id: str, total_in: int, total_out: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as fh:
         fh.write(f'{ts:.3f} {session_id} {total_in} {total_out}\n')
 
 
-def setup_rate(monkeypatch, tmp_home):
+def setup_rate(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> Path:
     """Patch time and constants to deterministic values; return log path."""
     monkeypatch.setattr(sl, 'time', FakeTime)
     monkeypatch.setattr(sl.TokenRate, 'WINDOW', 60.0)
@@ -32,14 +36,14 @@ def setup_rate(monkeypatch, tmp_home):
     return _log_path(tmp_home)
 
 
-def test_single_sample_returns_zero(monkeypatch, tmp_home):
+def test_single_sample_returns_zero(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """3.4 Empty log + first update returns 0."""
     setup_rate(monkeypatch, tmp_home)
     result = sl.TokenRate.update('sess-1', 100, 200)
     assert result == 0
 
 
-def test_two_samples_in_window_return_delta(monkeypatch, tmp_home):
+def test_two_samples_in_window_return_delta(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """3.5 One synthetic row 30 s ago + new update returns the token delta."""
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 30, 'sess-1', 100, 200)
@@ -49,7 +53,7 @@ def test_two_samples_in_window_return_delta(monkeypatch, tmp_home):
     assert result == 100
 
 
-def test_stale_rows_pruned_from_disk(monkeypatch, tmp_home):
+def test_stale_rows_pruned_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """3.6 Rows older than KEEP are removed from disk."""
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 9999, 'sess-1', 1, 1)
@@ -60,14 +64,14 @@ def test_stale_rows_pruned_from_disk(monkeypatch, tmp_home):
     assert f'{NOW - 9999:.3f}' not in content
 
 
-def test_history_no_samples_returns_zeros(monkeypatch, tmp_home):
+def test_history_no_samples_returns_zeros(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """3.7 history with no samples for the session returns [0]*n_buckets."""
     setup_rate(monkeypatch, tmp_home)
     result = sl.TokenRate.history('sess-1', 5, 60.0)
     assert result == [0, 0, 0, 0, 0]
 
 
-def test_history_two_samples_same_bucket(monkeypatch, tmp_home):
+def test_history_two_samples_same_bucket(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
     """3.8 history with two samples in the same bucket returns one non-zero bucket of the right delta."""
     log = setup_rate(monkeypatch, tmp_home)
     # Place two samples very close together in the last second of the window.

@@ -1,5 +1,4 @@
 import statusline_command as sl
-from conftest import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
@@ -8,7 +7,7 @@ CLR_ALERT = sl.CLR_ALERT
 SOFT_LIMIT = sl.SOFT_LIMIT
 
 
-def test_context_line_under_soft_limit():
+def test_context_line_under_soft_limit() -> None:
     r = Renderer()
     ctx = ContextWindow(
         total_input_tokens=10_000,
@@ -21,7 +20,7 @@ def test_context_line_under_soft_limit():
     assert CLR_ALERT not in out
 
 
-def test_context_line_over_soft_limit():
+def test_context_line_over_soft_limit() -> None:
     r = Renderer()
     ctx = ContextWindow(
         total_input_tokens=200_000,
@@ -34,7 +33,7 @@ def test_context_line_over_soft_limit():
     assert _visible_width(out) <= available
 
 
-def test_context_line_compact_respects_available():
+def test_context_line_compact_respects_available() -> None:
     r = Renderer()
     ctx = ContextWindow(
         total_input_tokens=10_000,

@@ -1,15 +1,16 @@
 """Tests for Workspace.plugins (merges settings.json files)."""
 import json
+from pathlib import Path
 
 import statusline_command as sl
 
 
-def _write_settings(path, plugins: dict):
+def _write_settings(path: Path, plugins: dict[str, bool]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({'enabledPlugins': plugins}))
 
 
-def test_plugins_merged_from_home_and_project(tmp_home, tmp_path):
+def test_plugins_merged_from_home_and_project(tmp_home: Path, tmp_path: Path) -> None:
     """8.2 Plugins from home and project settings are merged."""
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': True})
     project_dir = tmp_path / 'myproject'
@@ -21,7 +22,7 @@ def test_plugins_merged_from_home_and_project(tmp_home, tmp_path):
     assert 'bar' in result
 
 
-def test_false_values_excluded(tmp_home):
+def test_false_values_excluded(tmp_home: Path) -> None:
     """8.3 False values are excluded from plugins."""
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': False})
 
@@ -30,7 +31,7 @@ def test_false_values_excluded(tmp_home):
     assert 'foo' not in result
 
 
-def test_duplicates_collapsed_first_seen_order(tmp_home, tmp_path):
+def test_duplicates_collapsed_first_seen_order(tmp_home: Path, tmp_path: Path) -> None:
     """8.4 Duplicates collapsed; first-seen order preserved."""
     # foo appears in both home (first) and project (second)
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': True})
@@ -42,7 +43,7 @@ def test_duplicates_collapsed_first_seen_order(tmp_home, tmp_path):
     assert result.split(',').count('foo') == 1
 
 
-def test_malformed_json_silently_skipped(tmp_home, tmp_path):
+def test_malformed_json_silently_skipped(tmp_home: Path, tmp_path: Path) -> None:
     """8.5 Malformed JSON in one file is silently skipped; other file still read."""
     # Write invalid JSON to home settings
     home_settings = tmp_home / '.claude' / 'settings.json'

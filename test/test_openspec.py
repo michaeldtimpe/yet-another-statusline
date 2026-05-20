@@ -1,4 +1,6 @@
 """Tests for OpenSpec._find_root and OpenSpec.from_cwd."""
+from pathlib import Path
+
 import statusline_command as sl
 
 
@@ -6,7 +8,7 @@ import statusline_command as sl
 # 7.2  _find_root walks upward to find an openspec/ directory
 # ---------------------------------------------------------------------------
 
-def test_find_root_walks_upward(tmp_path):
+def test_find_root_walks_upward(tmp_path: Path) -> None:
     """_find_root walks up from a subdirectory to find openspec/."""
     openspec_dir = tmp_path / 'openspec' / 'specs'
     openspec_dir.mkdir(parents=True)
@@ -17,7 +19,7 @@ def test_find_root_walks_upward(tmp_path):
     assert result == str(tmp_path / 'openspec')
 
 
-def test_find_root_no_openspec_returns_empty(tmp_path):
+def test_find_root_no_openspec_returns_empty(tmp_path: Path) -> None:
     """_find_root returns '' when no openspec/ directory is found."""
     result = sl.OpenSpec._find_root(str(tmp_path))
     assert result == ''
@@ -27,7 +29,7 @@ def test_find_root_no_openspec_returns_empty(tmp_path):
 # 7.3  Counts - [ ] vs - [x] lines in tasks.md
 # ---------------------------------------------------------------------------
 
-def test_counts_open_and_done_tasks(tmp_path):
+def test_counts_open_and_done_tasks(tmp_path: Path) -> None:
     """from_cwd counts - [ ] and - [x] lines per tasks.md."""
     changes_dir = tmp_path / 'openspec' / 'changes' / 'my-change'
     changes_dir.mkdir(parents=True)
@@ -49,7 +51,7 @@ def test_counts_open_and_done_tasks(tmp_path):
 # 7.4  Archived changes are excluded
 # ---------------------------------------------------------------------------
 
-def test_archived_changes_excluded(tmp_path):
+def test_archived_changes_excluded(tmp_path: Path) -> None:
     """Changes under /archive/ are excluded from results."""
     archive_dir = tmp_path / 'openspec' / 'changes' / 'archive' / 'old-change'
     archive_dir.mkdir(parents=True)
@@ -63,7 +65,7 @@ def test_archived_changes_excluded(tmp_path):
 # 7.5  tasks.md with zero checkboxes is excluded
 # ---------------------------------------------------------------------------
 
-def test_empty_tasks_excluded(tmp_path):
+def test_empty_tasks_excluded(tmp_path: Path) -> None:
     """A tasks.md with no checkbox lines is excluded from results."""
     changes_dir = tmp_path / 'openspec' / 'changes' / 'empty-change'
     changes_dir.mkdir(parents=True)
