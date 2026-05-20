@@ -1,4 +1,7 @@
+from typing import Any
+
 import pytest
+
 import statusline_command as sl
 
 
@@ -22,7 +25,7 @@ _FROM_DICT_CASES = [
 
 
 @pytest.mark.parametrize('name,cls,default', _FROM_DICT_CASES, ids=[c[0] for c in _FROM_DICT_CASES])
-def test_from_dict_empty_yields_defaults(name, cls, default):
+def test_from_dict_empty_yields_defaults(name: str, cls: Any, default: object) -> None:
     assert cls.from_dict({}) == default
 
 
@@ -30,7 +33,7 @@ def test_from_dict_empty_yields_defaults(name, cls, default):
 # 2.3  Unknown key is silently ignored
 # ---------------------------------------------------------------------------
 
-def test_session_info_ignores_unknown_key():
+def test_session_info_ignores_unknown_key() -> None:
     result = sl.SessionInfo.from_dict({'experimental_field': 'x'})
     assert result == sl.SessionInfo()
 
@@ -39,7 +42,7 @@ def test_session_info_ignores_unknown_key():
 # 2.4  ContextWindow: missing current_usage → default CurrentUsage
 # ---------------------------------------------------------------------------
 
-def test_context_window_missing_current_usage():
+def test_context_window_missing_current_usage() -> None:
     result = sl.ContextWindow.from_dict({'used_percentage': 8})
     assert result.current_usage == sl.CurrentUsage()
     assert result.used_percentage == 8
@@ -49,7 +52,7 @@ def test_context_window_missing_current_usage():
 # 2.5  RateBucket: used_percentage is rounded to two decimal places
 # ---------------------------------------------------------------------------
 
-def test_rate_bucket_rounds_used_percentage():
+def test_rate_bucket_rounds_used_percentage() -> None:
     result = sl.RateBucket.from_dict({'used_percentage': 12.3456, 'resets_at': 1700000000})
     assert result == sl.RateBucket(used_percentage=12.35, resets_at=1700000000)
 
@@ -58,7 +61,7 @@ def test_rate_bucket_rounds_used_percentage():
 # 2.6  SessionInfo.from_dict recursively populates nested objects
 # ---------------------------------------------------------------------------
 
-def test_session_info_recursive_population():
+def test_session_info_recursive_population() -> None:
     payload = {
         'session_id': 'abc123',
         'model': {'id': 'claude-sonnet-4-6', 'display_name': 'Sonnet'},

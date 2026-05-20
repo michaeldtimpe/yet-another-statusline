@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
+
+import pytest
 
 import statusline_command as sl
 from conftest import strip_ansi
@@ -8,13 +10,13 @@ Renderer = sl.Renderer
 RateBucket = sl.RateBucket
 
 
-def test_helper_no_usage_no_reset():
+def test_helper_no_usage_no_reset() -> None:
     r = Renderer()
     out = r.helper(RateBucket())
     assert out == '∞'
 
 
-def test_helper_used_no_reset():
+def test_helper_used_no_reset() -> None:
     r = Renderer()
     out = r.helper(RateBucket(used_percentage=10.0, resets_at=0))
     stripped = strip_ansi(out)
@@ -22,12 +24,12 @@ def test_helper_used_no_reset():
     assert '10.0%' in stripped
 
 
-def test_helper_reset_in_future(monkeypatch):
+def test_helper_reset_in_future(monkeypatch: pytest.MonkeyPatch) -> None:
     fixed_now = datetime(2026, 5, 20, 12, 0, 0, tzinfo=timezone.utc)
 
     class _FakeDatetime(datetime):
         @classmethod
-        def now(cls, tz=None):
+        def now(cls, tz: tzinfo | None = None) -> datetime:  # type: ignore[override]
             if tz is not None:
                 return fixed_now.astimezone(tz)
             return fixed_now

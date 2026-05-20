@@ -7,14 +7,14 @@ RateLimits = sl.RateLimits
 RateBucket = sl.RateBucket
 
 
-def test_model_section_no_seven_day_suffix():
+def test_model_section_no_seven_day_suffix() -> None:
     r = Renderer()
     out, _ = r.model_section('Sonnet 4.6', '', RateLimits())
     stripped = strip_ansi(out)
     assert '%' not in stripped
 
 
-def test_model_section_seven_day_appears_when_used():
+def test_model_section_seven_day_appears_when_used() -> None:
     r = Renderer()
     rate = RateLimits(seven_day=RateBucket(used_percentage=12.5))
     out, _ = r.model_section('Sonnet 4.6', '', rate)
@@ -22,14 +22,14 @@ def test_model_section_seven_day_appears_when_used():
     assert '12.5%' in stripped
 
 
-def test_model_section_returns_divider_offset():
+def test_model_section_returns_divider_offset() -> None:
     r = Renderer()
     out, div = r.model_section('Sonnet 4.6', '', RateLimits())
     stripped = strip_ansi(out)
     assert stripped[div] == '│'
 
 
-def test_model_section_compact_respects_max_width():
+def test_model_section_compact_respects_max_width() -> None:
     r = Renderer()
     out, _ = r.model_section_compact('A' * 100, RateLimits(), max_width=30)
     assert _visible_width(out) <= 30

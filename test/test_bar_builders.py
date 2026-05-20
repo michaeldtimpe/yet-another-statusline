@@ -9,11 +9,11 @@ _r = sl.Renderer()
 # 7.2  gradient_bar
 # ---------------------------------------------------------------------------
 
-def test_gradient_bar_zero_fill_is_empty():
+def test_gradient_bar_zero_fill_is_empty() -> None:
     assert _r.gradient_bar(0, 30) == ''
 
 
-def test_gradient_bar_visible_width():
+def test_gradient_bar_visible_width() -> None:
     # filled=5 → 5 FILLED glyphs + 1 MID leading-edge glyph = 6 visible chars
     result = _r.gradient_bar(5, 30)
     stripped = strip_ansi(result)
@@ -24,14 +24,14 @@ def test_gradient_bar_visible_width():
 # 7.3  spec_gradient_bar: idx wraps modulo palette length
 # ---------------------------------------------------------------------------
 
-def test_spec_gradient_bar_idx_wraps():
+def test_spec_gradient_bar_idx_wraps() -> None:
     palette_len = len(sl.Renderer.SPEC_GRADIENTS)
     result_zero = strip_ansi(_r.spec_gradient_bar(3, 30, idx=0))
     result_wrap = strip_ansi(_r.spec_gradient_bar(3, 30, idx=palette_len))
     assert result_zero == result_wrap
 
 
-def test_spec_gradient_bar_content_is_heavy_glyphs():
+def test_spec_gradient_bar_content_is_heavy_glyphs() -> None:
     # After stripping ANSI, should be 3 HEAVY glyphs
     stripped = strip_ansi(_r.spec_gradient_bar(3, 30, idx=0))
     assert stripped == sl.BarChars.HEAVY * 3

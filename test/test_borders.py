@@ -7,37 +7,37 @@ Renderer = sl.Renderer
 
 
 @pytest.fixture
-def r():
+def r() -> sl.Renderer:
     return Renderer()
 
 
 @pytest.mark.parametrize('w', [10, 40, 55, 80, 130])
-def test_border_top_width(r, w):
+def test_border_top_width(r: sl.Renderer, w: int) -> None:
     assert _visible_width(r.border_top(w)) == w
 
 
 @pytest.mark.parametrize('w', [10, 40, 55, 80, 130])
-def test_border_bottom_width(r, w):
+def test_border_bottom_width(r: sl.Renderer, w: int) -> None:
     assert _visible_width(r.border_bottom(w)) == w
 
 
 @pytest.mark.parametrize('w', [10, 40, 55, 80, 130])
-def test_border_separator_width(r, w):
+def test_border_separator_width(r: sl.Renderer, w: int) -> None:
     assert _visible_width(r.border_separator(w)) == w
 
 
 @pytest.mark.parametrize('w', [10, 40, 55, 80, 130])
-def test_border_separator_dim_width(r, w):
+def test_border_separator_dim_width(r: sl.Renderer, w: int) -> None:
     assert _visible_width(r.border_separator_dim(w)) == w
 
 
-def test_border_top_session_id_truncated(r):
+def test_border_top_session_id_truncated(r: sl.Renderer) -> None:
     out = r.border_top(width=20, session_id='a' * 50)
     assert _visible_width(out) == 20
     assert '…' in strip_ansi(out)
 
 
-def test_border_bottom_ups_markers(r):
+def test_border_bottom_ups_markers(r: sl.Renderer) -> None:
     out = r.border_bottom(width=20, ups=(5, 10))
     stripped = strip_ansi(out)
     assert _visible_width(out) == 20
@@ -46,6 +46,6 @@ def test_border_bottom_ups_markers(r):
     assert stripped[9] == '┴'
 
 
-def test_border_line_width(r):
+def test_border_line_width(r: sl.Renderer) -> None:
     out = r.border_line('hello', width=20)
     assert _visible_width(out) == 20

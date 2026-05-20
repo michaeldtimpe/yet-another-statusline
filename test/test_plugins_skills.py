@@ -5,7 +5,7 @@ _visible_width = sl._visible_width
 Renderer = sl.Renderer
 
 
-def test_plugins_skills_all_three_groups():
+def test_plugins_skills_all_three_groups() -> None:
     r = Renderer()
     out = r.plugins_skills(
         skills_count=1,
@@ -20,7 +20,7 @@ def test_plugins_skills_all_three_groups():
     assert stripped.count('|') == 2
 
 
-def test_plugins_skills_only_skills():
+def test_plugins_skills_only_skills() -> None:
     r = Renderer()
     out = r.plugins_skills(
         skills_count=1,
@@ -33,7 +33,7 @@ def test_plugins_skills_only_skills():
     assert '|' not in stripped
 
 
-def test_plugins_skills_nothing():
+def test_plugins_skills_nothing() -> None:
     r = Renderer()
     out = r.plugins_skills(
         skills_count=0,

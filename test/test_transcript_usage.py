@@ -1,10 +1,11 @@
 """Tests for TranscriptUsage.from_transcript."""
 import json
+from pathlib import Path
 
 import statusline_command as sl
 
 
-def _assistant_line(msg_id, input_tokens=0, cache_creation=0, cache_read=0, output_tokens=0):
+def _assistant_line(msg_id: str, input_tokens: int = 0, cache_creation: int = 0, cache_read: int = 0, output_tokens: int = 0) -> str:
     return json.dumps({
         'type': 'assistant',
         'message': {
@@ -20,13 +21,13 @@ def _assistant_line(msg_id, input_tokens=0, cache_creation=0, cache_read=0, outp
     })
 
 
-def test_missing_path_returns_empty():
+def test_missing_path_returns_empty() -> None:
     """4.2 Missing path returns TranscriptUsage()."""
     result = sl.TranscriptUsage.from_transcript('/nonexistent/path.jsonl')
     assert result == sl.TranscriptUsage()
 
 
-def test_two_distinct_assistant_messages_sum_correctly(tmp_path):
+def test_two_distinct_assistant_messages_sum_correctly(tmp_path: Path) -> None:
     """4.3 Two distinct assistant messages with usage sum correctly."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(
@@ -38,7 +39,7 @@ def test_two_distinct_assistant_messages_sum_correctly(tmp_path):
     assert result.output_tokens == 40
 
 
-def test_duplicate_message_id_counted_once(tmp_path):
+def test_duplicate_message_id_counted_once(tmp_path: Path) -> None:
     """4.4 Duplicate message ids are counted only once."""
     p = tmp_path / 'transcript.jsonl'
     line = _assistant_line('a', input_tokens=10, output_tokens=20)
@@ -49,7 +50,7 @@ def test_duplicate_message_id_counted_once(tmp_path):
     assert result.output_tokens == 20
 
 
-def test_malformed_line_skipped(tmp_path):
+def test_malformed_line_skipped(tmp_path: Path) -> None:
     """4.5 Malformed line interleaved with valid lines does not raise, valid line counted."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(

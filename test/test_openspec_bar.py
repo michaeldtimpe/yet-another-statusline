@@ -5,13 +5,13 @@ _visible_width = sl._visible_width
 Renderer = sl.Renderer
 
 
-def test_openspec_bar_visible_width():
+def test_openspec_bar_visible_width() -> None:
     r = Renderer()
     out = r.openspec_bar('x', 3, 10, 80, 25, 0)
     assert _visible_width(out) == 77
 
 
-def test_openspec_bar_long_name_truncated():
+def test_openspec_bar_long_name_truncated() -> None:
     r = Renderer()
     out = r.openspec_bar('a' * 100, 1, 2, 80, 25, 0)
     stripped = strip_ansi(out)
@@ -21,7 +21,7 @@ def test_openspec_bar_long_name_truncated():
     assert title_segment.endswith('...')
 
 
-def test_openspec_bar_counts_and_percent():
+def test_openspec_bar_counts_and_percent() -> None:
     r = Renderer()
     out = r.openspec_bar('x', 3, 10, 80, 25, 0)
     stripped = strip_ansi(out)
