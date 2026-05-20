@@ -36,7 +36,7 @@ def terminal_width() -> int:
         w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
         if w > 0:
             return w
-    except OSError:
+    except (OSError, ValueError):
         pass
     try:
         w = int((HOME / '.claude' / 'terminal-width').read_text().strip())
