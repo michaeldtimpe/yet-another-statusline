@@ -31,6 +31,6 @@ def test_model_section_returns_divider_offset():
 
 def test_model_section_compact_respects_max_width():
     r = Renderer()
-    out = r.model_section_compact('A' * 100, RateLimits(), max_width=30)
+    out, _ = r.model_section_compact('A' * 100, RateLimits(), max_width=30)
     assert _visible_width(out) <= 30
     assert '…' in strip_ansi(out)

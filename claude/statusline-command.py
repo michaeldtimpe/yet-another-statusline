@@ -100,6 +100,15 @@ ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 
+PILL_TL    = '▗'  # U+2597 lower-right quadrant
+PILL_TOP   = '▄'  # U+2584 lower half block
+PILL_TR    = '▖'  # U+2596 lower-left quadrant
+PILL_LEFT  = '▐'  # U+2590 right half block
+PILL_RIGHT = '▌'  # U+258C left half block
+PILL_BL    = '▝'  # U+259D upper-right quadrant
+PILL_BOT   = '▀'  # U+2580 upper half block
+PILL_BR    = '▘'  # U+2598 upper-left quadrant
+
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
@@ -910,6 +919,21 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
     return ''.join(parts)
 
 
+
+def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
+                     anchor: tuple[int, int, int], shift: tuple[int, int, int],
+                     pct: int) -> str:
+    c0 = _scale(anchor, pct)
+    c1 = _scale(shift, pct)
+    span = max(1, pill_end - pill_start)
+    t = (col - pill_start) / span
+    t = max(0.0, min(1.0, t))
+    r = int(c0[0] + (c1[0] - c0[0]) * t)
+    g = int(c0[1] + (c1[1] - c0[1]) * t)
+    b = int(c0[2] + (c1[2] - c0[2]) * t)
+    return f'[38;2;{r};{g};{b}m'
+
+
 def _short_agent_name(agent_type: str, description: str) -> str:
     if agent_type.lower() in ('general-purpose', 'explore', 'plan'):
         parts = description.split(' - ', 1)
@@ -975,23 +999,39 @@ class Renderer:
     SONNET    = CLR_GREEN_OK
     HAIKU     = CLR_SKY_BLUE
 
-    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0) -> str:
+    def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: tuple | None = None) -> str:
         downs_set = set(downs)
+        p_start, p_end, p_anchor, p_shift, p_pct = pill if pill else (-1, -1, (0,0,0), (0,0,0), 0)
         def _ch(col: int) -> str:
+            if p_pct and p_start <= col <= p_end:
+                if col == p_start:
+                    return PILL_TL
+                if col == p_end:
+                    return PILL_TR
+                return PILL_TOP
             return '┬' if col in downs_set else '─'
-        parts = [self.grad_at(0, width, fill=fill), '╭']
+        def _clr(col: int, pos: int) -> str:
+            if p_pct and p_start <= col <= p_end:
+                return pill_gradient_fg(col - p_start, 0, p_end - p_start, p_anchor, p_shift, p_pct)
+            return self.grad_at(pos, width, fill=fill)
+        if p_pct and p_start <= 1:
+            parts = [pill_gradient_fg(0, 0, p_end - p_start, p_anchor, p_shift, p_pct), PILL_TL]
+        else:
+            parts = [self.grad_at(0, width, fill=fill), '╭']
         if session_id:
             avail = max(0, width - 4)
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
             sid_w = _visible_width(sid)
-            parts += [self.grad_at(1, width, fill=fill), _ch(2), self.grad_at(2, width, fill=fill), _ch(3), self.SESSION, sid]
+            parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, sid]
             offset = 3 + sid_w
             rest = max(0, width - 4 - sid_w)
             for i in range(rest):
-                parts += [self.grad_at(offset + i, width, fill=fill), _ch(offset + i + 1)]
+                col = offset + i + 1
+                parts += [_clr(col, offset + i), _ch(col)]
         else:
             for i in range(1, width - 1):
-                parts += [self.grad_at(i, width, fill=fill), _ch(i + 1)]
+                col = i + 1
+                parts += [_clr(col, i), _ch(col)]
         parts += [self.grad_at(width - 1, width, fill=fill), '╮', self.R]
         return ''.join(parts)
 
@@ -1013,25 +1053,47 @@ class Renderer:
         parts += [self.grad_at(width - 1, width, fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
+    def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: tuple | None = None, pill_edge: str = 'bottom') -> str:
         downs_set = set(downs)
         ups_set = set(ups)
-        parts = [self.grad_at(0, width, 0.6, fill=fill), '├']
+        p_start, p_end, p_anchor, p_shift, p_pct = pill if pill else (-1, -1, (0,0,0), (0,0,0), 0)
+        if pill_edge == 'top':
+            p_corner_l, p_fill, p_corner_r = PILL_TL, PILL_TOP, PILL_TR
+        else:
+            p_corner_l, p_fill, p_corner_r = PILL_BL, PILL_BOT, PILL_BR
+        if p_pct and p_start <= 1:
+            parts = [pill_gradient_fg(0, 0, p_end - p_start, p_anchor, p_shift, p_pct), p_corner_l]
+        else:
+            parts = [self.grad_at(0, width, 0.6, fill=fill), '├']
         for i in range(width - 2):
             col = i + 2
-            if col in downs_set and col in ups_set:
-                ch = '┼'
-            elif col in downs_set:
-                ch = '┬'
-            elif col in ups_set:
-                ch = '┴'
+            if p_pct and p_start <= col <= p_end:
+                if col == p_start:
+                    ch = p_corner_l
+                elif col == p_end:
+                    ch = p_corner_r
+                else:
+                    ch = p_fill
+                parts += [pill_gradient_fg(col - p_start, 0, p_end - p_start, p_anchor, p_shift, p_pct), ch]
             else:
-                ch = '┄'
-            parts += [self.grad_at(i + 1, width, 0.6, fill=fill), ch]
+                if col in downs_set and col in ups_set:
+                    ch = '┼'
+                elif col in downs_set:
+                    ch = '┬'
+                elif col in ups_set:
+                    ch = '┴'
+                else:
+                    ch = '┄'
+                parts += [self.grad_at(i + 1, width, 0.6, fill=fill), ch]
         parts += [self.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '') -> str:
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False) -> str:
+        if pill_flush:
+            pad = max(0, width - 1 - _visible_width(content))
+            right = self.grad_at(width - 1, width, fill=fill)
+            pad_str = ' ' * pad
+            return f'{content}{pad_str}{right}│{self.R}'
         pad = max(0, width - 3 - _visible_width(content))
         left  = self.grad_at(0, width, fill=fill)
         right = self.grad_at(width - 1, width, fill=fill)
@@ -1061,9 +1123,13 @@ class Renderer:
             f'{dirty}{tail}'
         )
 
-    def path_model_row(self, left: str, right: str, box_width: int) -> tuple[str, int] | None:
-        vsep = f'  {self.BORDER}│{self.R}  '
-        vsep_w = 5
+    def path_model_row(self, left: str, right: str, box_width: int, pill_active: bool = False) -> tuple[str, int] | None:
+        if pill_active:
+            vsep = '  '
+            vsep_w = 2
+        else:
+            vsep = f'  {self.BORDER}│{self.R}  '
+            vsep_w = 5
         left_w = _visible_width(left)
         right_w = _visible_width(right)
         content_w = box_width - 3
@@ -1124,19 +1190,25 @@ class Renderer:
             for ch in model_thinking:
                 cells.append((ch, anchor, False, True))
             cells.append((' ', anchor, False, False))
-            line = paint_bg_span(cells, anchor, shift, pct)
+            pill_left = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
+            pill_right = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
+            line = pill_left + paint_bg_span(cells, anchor, shift, pct) + pill_right + RESET
         else:
             line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
         left_w = _visible_width(line)
-        vsep = f'  {self.BORDER}│{self.R}  '
-        line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        if pct:
+            vsep = '  '
+            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        else:
+            vsep = f'  {self.BORDER}│{self.R}  '
+            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
             line += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
-        return line, left_w + 2
+        return line, left_w if pct else left_w + 2
 
-    def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> str:
+    def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> tuple[str, int]:
         model_clr = self.model_colour(model_name)
         pct_bg    = self._model_bg_pct(effort_level)
         anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
@@ -1160,7 +1232,7 @@ class Renderer:
         except Exception:
             pass
 
-        def _build(name: str, rate: str) -> str:
+        def _build(name: str, rate: str) -> tuple[str, int]:
             if pct_bg:
                 cells = []
                 cells.append((GLYPH_MODEL, anchor, False, False))
@@ -1169,28 +1241,31 @@ class Renderer:
                 for ch in name:
                     cells.append((ch, anchor, False, False))
                 cells.append((' ', anchor, False, False))
-                painted = paint_bg_span(cells, anchor, shift, pct_bg)
+                pill_l = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
+                pill_r = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg) + pill_r + RESET
+                pw = _visible_width(painted)
                 return (
                     f'{painted}'
                     f'{self.LABEL}|{self.R}'
                     f' {c_helper}{BOLD}{self.R} {rate}'
-                )
+                ), pw
             return (
                 f'{model_clr}󰢹  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
                 f' {c_helper}{BOLD}{self.R} {rate}'
-            )
+            ), 0
 
         if rate_with_time:
-            line = _build(model_name, rate_with_time)
+            line, pw = _build(model_name, rate_with_time)
             if _visible_width(line) <= max_width:
-                return line
+                return line, pw
 
-        line = _build(model_name, rate_pct)
+        line, pw = _build(model_name, rate_pct)
         if _visible_width(line) <= max_width:
-            return line
+            return line, pw
 
-        base_w      = _visible_width(_build('', rate_pct))
+        base_w      = _visible_width(_build('', rate_pct)[0])
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
@@ -1522,14 +1597,17 @@ def main() -> None:
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
     bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
     bg_trail      = r.model_bg_trail(session.model_name, effort_for_bg)
+    pill_pct      = r._model_bg_pct(effort_for_bg)
+    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     if width < NARROW_WIDTH:
-        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
+        line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 1 if pill_pct else width - 3, effort_for_bg)
         line_context = r.context_line_compact(ctx, width - 3)
+        pill = (1, pill_w, pill_anchor, pill_shift, pill_pct) if pill_w else None
         lines = [
-            r.border_top(width, session.session_id, fill=fill),
-            r.border_line(line_model, width, fill=fill, bg_lead=bg_lead),
-            r.border_separator_dim(width, fill=fill),
+            r.border_top(width, session.session_id, fill=fill, pill=pill),
+            r.border_line(line_model, width, fill=fill, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
+            r.border_separator_dim(width, fill=fill, pill=pill),
             r.border_line(line_context, width, fill=fill),
             r.border_bottom(width, fill=fill),
         ]
@@ -1537,24 +1615,30 @@ def main() -> None:
     elif width < MEDIUM_WIDTH:
         git          = GitInfo.from_cwd(session.cwd)
         line_path    = r.path_git_compact(session.short_pwd, git)
-        line_model   = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
+        line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
         line_context = r.context_line_compact(ctx, width - 3)
-        combined = r.path_model_row(line_path, line_model, width)
+        combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
         if combined is not None:
             combined_line, div_col = combined
+            pill = (div_col, div_col + pill_w - 1, pill_anchor, pill_shift, pill_pct) if pill_w else None
             lines = [
-                r.border_top(width, session.session_id, downs=(div_col,), fill=fill),
+                r.border_top(width, session.session_id, downs=() if pill_w else (div_col,), fill=fill, pill=pill),
                 r.border_line(combined_line, width, fill=fill),
-                r.border_separator_dim(width, ups=(div_col,), fill=fill),
+                r.border_separator_dim(width, ups=() if pill_w else (div_col,), fill=fill, pill=pill),
                 r.border_line(line_context, width, fill=fill),
                 r.border_bottom(width, fill=fill),
             ]
         else:
+            pill = (1, pill_w, pill_anchor, pill_shift, pill_pct) if pill_w else None
             lines = [
                 r.border_top(width, session.session_id, fill=fill),
                 r.border_line(line_path, width, fill=fill),
-                r.border_line(line_model, width, fill=fill, bg_lead=bg_lead),
-                r.border_separator_dim(width, fill=fill),
+            ]
+            if pill:
+                lines.append(r.border_separator_dim(width, fill=fill, pill=pill, pill_edge='top'))
+            lines += [
+                r.border_line(line_model, width, fill=fill, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
+                r.border_separator_dim(width, fill=fill, pill=pill),
                 r.border_line(line_context, width, fill=fill),
                 r.border_bottom(width, fill=fill),
             ]
@@ -1582,28 +1666,51 @@ def main() -> None:
 
         line_context = r.context_line(ctx, width - 3)
 
-        combined = r.path_model_row(line_path, line_model, width)
+        pill_w_wide = model_div_offset if pill_pct else 0
+        combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
         if combined is not None:
             combined_line, top_div_col = combined
-            model_div_col = top_div_col + 3 + model_div_offset
-            lines = [
-                r.border_top(width, session.session_id, downs=(top_div_col, model_div_col), fill=fill),
-                r.border_line(combined_line, width, fill=fill, bg_trail=bg_trail),
-            ]
-            next_ups: tuple[int, ...] = (top_div_col, model_div_col)
+            if pill_w_wide:
+                pill = (top_div_col, top_div_col + pill_w_wide - 1, pill_anchor, pill_shift, pill_pct)
+                lines = [
+                    r.border_top(width, session.session_id, downs=(), fill=fill, pill=pill),
+                    r.border_line(combined_line, width, fill=fill),
+                ]
+                next_ups: tuple[int, ...] = ()
+            else:
+                model_div_col = top_div_col + 3 + model_div_offset
+                pill = None
+                lines = [
+                    r.border_top(width, session.session_id, downs=(top_div_col, model_div_col), fill=fill),
+                    r.border_line(combined_line, width, fill=fill, bg_trail=bg_trail),
+                ]
+                next_ups = (top_div_col, model_div_col)
         else:
-            model_div_col = 3 + model_div_offset
-            lines = [
-                r.border_top(width, session.session_id, fill=fill),
-                r.border_line(line_path, width, fill=fill),
-                r.border_line(line_model, width, fill=fill, bg_lead=bg_lead, bg_trail=bg_trail),
-            ]
-            next_ups = (model_div_col,)
+            if pill_w_wide:
+                pill = (1, pill_w_wide, pill_anchor, pill_shift, pill_pct)
+                lines = [
+                    r.border_top(width, session.session_id, fill=fill),
+                    r.border_line(line_path, width, fill=fill),
+                    r.border_separator_dim(width, fill=fill, pill=pill, pill_edge='top'),
+                    r.border_line(line_model, width, fill=fill, pill_flush=True),
+                ]
+                next_ups = ()
+            else:
+                model_div_col = 3 + model_div_offset
+                pill = None
+                lines = [
+                    r.border_top(width, session.session_id, fill=fill),
+                    r.border_line(line_path, width, fill=fill),
+                    r.border_line(line_model, width, fill=fill, bg_lead=bg_lead, bg_trail=bg_trail),
+                ]
+                next_ups = (model_div_col,)
         if plugins_line:
-            lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
+            lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill, pill=pill))
             lines.append(r.border_line(plugins_line, width, fill=fill))
             next_ups = ()
-        lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
+            lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill))
+        else:
+            lines.append(r.border_separator_dim(width, ups=next_ups, fill=fill, pill=pill))
         lines.append(r.border_line(line_context, width, fill=fill))
         lines.append(r.border_separator_dim(width, downs=vsep_cols, fill=fill))
         for lt in line_tokens:
