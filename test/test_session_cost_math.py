@@ -6,7 +6,7 @@ import statusline_command as sl
 # 3.2  Sonnet: input=1_000_000, output=1_000_000 -> 18.0
 # ---------------------------------------------------------------------------
 
-def test_session_cost_sonnet():
+def test_session_cost_sonnet() -> None:
     usage = sl.TranscriptUsage(
         input_tokens=1_000_000,
         output_tokens=1_000_000,
@@ -21,7 +21,7 @@ def test_session_cost_sonnet():
 # 3.3  Opus: cache_creation=1_000_000, cache_read=1_000_000 -> 20.25
 # ---------------------------------------------------------------------------
 
-def test_session_cost_opus_cache():
+def test_session_cost_opus_cache() -> None:
     usage = sl.TranscriptUsage(
         cache_creation_input_tokens=1_000_000,
         cache_read_input_tokens=1_000_000,
@@ -36,7 +36,7 @@ def test_session_cost_opus_cache():
 # 3.4  Haiku: input=2_000_000, output=1_000_000 -> 5.60
 # ---------------------------------------------------------------------------
 
-def test_session_cost_haiku():
+def test_session_cost_haiku() -> None:
     usage = sl.TranscriptUsage(
         input_tokens=2_000_000,
         output_tokens=1_000_000,
@@ -51,7 +51,7 @@ def test_session_cost_haiku():
 # 3.5  Default -> session_cost == 0.0
 # ---------------------------------------------------------------------------
 
-def test_session_cost_default_zero():
+def test_session_cost_default_zero() -> None:
     usage = sl.TranscriptUsage()
     model = sl.Model()
     cost = sl.compute_session_cost(model, usage)
@@ -62,7 +62,7 @@ def test_session_cost_default_zero():
 # 3.6  day_cost via TokenLog
 # ---------------------------------------------------------------------------
 
-def test_day_cost_via_token_log():
+def test_day_cost_via_token_log() -> None:
     # Use sonnet rates: rate_in=3.00, rate_out=15.00
     # day_in=500_000, day_cache_read=200_000, day_out=100_000
     # expected = (500_000 * 3.00 + 200_000 * 3.00 * 0.1 + 100_000 * 15.00) / 1_000_000

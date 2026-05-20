@@ -6,7 +6,7 @@ Renderer = sl.Renderer
 GitInfo = sl.GitInfo
 
 
-def test_path_git_clean_no_elapsed():
+def test_path_git_clean_no_elapsed() -> None:
     r = Renderer()
     git = GitInfo(branch='main', commit='abc1234')
     out = r.path_git('~/proj', git, '')
@@ -19,7 +19,7 @@ def test_path_git_clean_no_elapsed():
     assert '[' not in stripped
 
 
-def test_path_git_dirty_with_elapsed():
+def test_path_git_dirty_with_elapsed() -> None:
     r = Renderer()
     git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=1)
     out = r.path_git('~/proj', git, '12m')
@@ -29,7 +29,7 @@ def test_path_git_dirty_with_elapsed():
     assert '[12m]' in stripped
 
 
-def test_path_git_zero_elapsed_suppressed():
+def test_path_git_zero_elapsed_suppressed() -> None:
     r = Renderer()
     git = GitInfo(branch='main', commit='abc1234')
     out = r.path_git('~/proj', git, '0m')
@@ -37,7 +37,7 @@ def test_path_git_zero_elapsed_suppressed():
     assert '[0m]' not in stripped
 
 
-def test_path_git_compact_no_commit_no_dirty():
+def test_path_git_compact_no_commit_no_dirty() -> None:
     r = Renderer()
     git = GitInfo(branch='main', commit='abc1234', modified=3, untracked=1)
     out = r.path_git_compact('~/proj', git)

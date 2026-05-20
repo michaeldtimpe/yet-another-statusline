@@ -6,7 +6,7 @@ import statusline_command as sl
 # ---------------------------------------------------------------------------
 
 class TestTranscriptUsageProps:
-    def test_billed_in(self):
+    def test_billed_in(self) -> None:
         u = sl.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
@@ -15,7 +15,7 @@ class TestTranscriptUsageProps:
         )
         assert u.billed_in == 12  # 10 + 2
 
-    def test_cache_read(self):
+    def test_cache_read(self) -> None:
         u = sl.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
@@ -24,7 +24,7 @@ class TestTranscriptUsageProps:
         )
         assert u.cache_read == 3
 
-    def test_out(self):
+    def test_out(self) -> None:
         u = sl.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
@@ -33,7 +33,7 @@ class TestTranscriptUsageProps:
         )
         assert u.out == 4
 
-    def test_all_props_combined(self):
+    def test_all_props_combined(self) -> None:
         u = sl.TranscriptUsage(
             input_tokens=10,
             cache_creation_input_tokens=2,
@@ -44,7 +44,7 @@ class TestTranscriptUsageProps:
         assert u.cache_read == 3
         assert u.out == 4
 
-    def test_zeros(self):
+    def test_zeros(self) -> None:
         u = sl.TranscriptUsage()
         assert u.billed_in == 0
         assert u.cache_read == 0

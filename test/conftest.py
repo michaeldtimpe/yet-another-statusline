@@ -2,6 +2,7 @@ import importlib.util
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -12,6 +13,7 @@ _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline-command.p
 
 if 'statusline_command' not in sys.modules:
     _spec = importlib.util.spec_from_file_location('statusline_command', _SRC)
+    assert _spec is not None and _spec.loader is not None
     _mod  = importlib.util.module_from_spec(_spec)
     sys.modules['statusline_command'] = _mod
     _spec.loader.exec_module(_mod)
@@ -29,7 +31,7 @@ def strip_ansi(s: str) -> str:
 
 
 @pytest.fixture(name='strip_ansi')
-def strip_ansi_fixture():
+def strip_ansi_fixture() -> Callable[[str], str]:
     return strip_ansi
 
 
@@ -37,6 +39,6 @@ def strip_ansi_fixture():
 # tmp_home: redirect sl.HOME to tmp_path so tests never touch the real $HOME
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def tmp_home(monkeypatch, tmp_path):
+def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(sl, 'HOME', tmp_path)
     return tmp_path
