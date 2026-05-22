@@ -1067,6 +1067,8 @@ class BorderRenderer:
             parts = [self.gradient.grad_at(0, width, fill=fill), '╭']
         if session_id:
             avail = max(0, width - 4)
+            if p.active and p.end == width and p.start > 5:
+                avail = max(0, min(avail, p.start - 5))
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
             sid_w = _visible_width(sid)
             parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, sid]
@@ -1079,7 +1081,10 @@ class BorderRenderer:
             for i in range(1, width - 1):
                 col = i + 1
                 parts += [_clr(col, i), _ch(col)]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╮', self.R]
+        if p.active and p.start <= width <= p.end:
+            parts += [p.border_fg(width), p.border_char(width, 'top'), self.R]
+        else:
+            parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╮', self.R]
         return ''.join(parts)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
@@ -1124,10 +1129,19 @@ class BorderRenderer:
                 else:
                     ch = '┄'
                 parts += [self.gradient.grad_at(i + 1, width, 0.6, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
+        if p.active and p.start <= width <= p.end:
+            parts += [p.border_fg(width), p.border_char(width, edge), self.R]
+        else:
+            parts += [self.gradient.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False) -> str:
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
+        if right_pill:
+            pill_w  = _visible_width(right_pill)
+            pad     = max(0, width - 2 - _visible_width(content) - pill_w)
+            left    = self.gradient.grad_at(0, width, fill=fill)
+            lead    = f'{bg_lead} \033[49m' if bg_lead else ' '
+            return f'{left}│{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
         if pill_flush:
             pad = max(0, width - 1 - _visible_width(content))
             right = self.gradient.grad_at(width - 1, width, fill=fill)
@@ -1239,8 +1253,8 @@ class Renderer:
     def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
         return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False) -> str:
-        return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush)
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
+        return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)
 
     def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
         dirty = ''
@@ -1260,21 +1274,6 @@ class Renderer:
             f'{self.COMMIT}{git.commit}{self.R}'
             f'{dirty}{tail}'
         )
-
-    def path_model_row(self, left: str, right: str, box_width: int, pill_active: bool = False) -> tuple[str, int] | None:
-        if pill_active:
-            vsep = '  '
-            vsep_w = 2
-        else:
-            vsep = f'  {self.BORDER}│{self.R}  '
-            vsep_w = 5
-        left_w = _visible_width(left)
-        right_w = _visible_width(right)
-        content_w = box_width - 3
-        if left_w + vsep_w + right_w > content_w:
-            return None
-        div_col = 3 + left_w + 2
-        return f'{left}{vsep}{right}', div_col
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
@@ -1306,45 +1305,6 @@ class Renderer:
         if cost >= 25:
             return CLR_YELLOW
         return CLR_GREEN_OK
-
-    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '') -> tuple[str, int]:
-        step      = rainbow_step()
-        c_think   = rainbow_at(step, 0)
-        c_helper  = rainbow_at(step, 9)
-        model_clr = self.model_colour(model_name)
-        pct       = self._model_bg_pct(effort_level)
-        if pct:
-            anchor, shift = self._model_anchor_pair(model_name)
-            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-            cells.append((GLYPH_MODEL,    anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            for ch in model_name:
-                cells.append((ch, anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((GLYPH_THINKING, anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            for ch in model_thinking:
-                cells.append((ch, anchor, False, True))
-            cells.append((' ', anchor, False, False))
-            pill_left = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
-            pill_right = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
-            line = pill_left + paint_bg_span(cells, anchor, shift, pct) + pill_right + RESET
-        else:
-            line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
-        left_w = _visible_width(line)
-        if pct:
-            vsep = '  '
-            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
-        else:
-            vsep = f'  {self.BORDER}│{self.R}  '
-            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
-        seven_day = rate_limits.seven_day
-        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
-            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            line += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
-        return line, left_w if pct else left_w + 2
 
     def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> tuple[str, int]:
         model_clr = self.model_colour(model_name)
@@ -1389,7 +1349,7 @@ class Renderer:
                     f' {c_helper}{BOLD}{self.R} {rate}'
                 ), pw
             return (
-                f'{model_clr}󰢹  {name}{self.R}'
+                f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
                 f' {c_helper}{BOLD}{self.R} {rate}'
             ), 0
@@ -1406,6 +1366,89 @@ class Renderer:
         base_w      = _visible_width(_build('', rate_pct)[0])
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
+
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '') -> tuple[str, str, int]:
+        step      = rainbow_step()
+        c_think   = rainbow_at(step, 0)
+        c_helper  = rainbow_at(step, 9)
+        model_clr = self.model_colour(model_name)
+        pct       = self._model_bg_pct(effort_level)
+
+        if pct:
+            anchor, shift = self._model_anchor_pair(model_name)
+            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+            cells.append((GLYPH_MODEL,    anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            for ch in model_name:
+                cells.append((ch, anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((GLYPH_THINKING, anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            for ch in model_thinking:
+                cells.append((ch, anchor, False, True))
+            cells.append((' ', anchor, False, False))
+            pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
+            pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
+            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct) + pill_r + RESET
+        elif model_thinking:
+            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{GLYPH_THINKING}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+        else:
+            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
+
+        right_w = _visible_width(right_text)
+
+        helper_text = f'{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        seven_day = rate_limits.seven_day
+        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
+            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
+            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
+
+        return helper_text, right_text, right_w
+
+    def model_right_section_compact(self, model_name: str, rate_limits: RateLimits, max_right_width: int, effort_level: str = '') -> tuple[str, str, int]:
+        model_clr = self.model_colour(model_name)
+        pct_bg    = self._model_bg_pct(effort_level)
+        anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
+        pct       = rate_limits.five_hour.used_percentage or 0
+        pct_clr   = self.fill_colour(float(pct))
+        rate_text = f'{pct_clr}{pct}%{self.R}'
+        try:
+            if rate_limits.five_hour.resets_at:
+                resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
+                delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+                if delta.total_seconds() > 0:
+                    total_s = int(delta.total_seconds())
+                    h, rem  = divmod(total_s, 3600)
+                    m       = rem // 60
+                    time_str = f'{h}h{m}m' if h else f'{m}m'
+                    rate_text = f'{rate_text} {self.COMMIT}{time_str}{self.R}'
+        except Exception:
+            pass
+
+        def _make_right(name: str) -> tuple[str, int]:
+            if pct_bg:
+                cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                for ch in name:
+                    cells.append((ch, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                pill_l  = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
+                pill_r  = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg) + pill_r + RESET
+                return painted, _visible_width(painted)
+            text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+            return text, _visible_width(text)
+
+        right_text, right_w = _make_right(model_name)
+        if right_w > max_right_width and max_right_width > 0:
+            _, base_w = _make_right('')
+            budget    = max(3, max_right_width - base_w - 1)
+            right_text, right_w = _make_right(model_name[:budget] + '…')
+        return rate_text, right_text, right_w
 
     def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str, subagents: list[tuple[str, str]] | None = None) -> str:
         step = rainbow_step()
@@ -1640,6 +1683,7 @@ class RowSpec:
     downs: tuple[int, ...] = ()
     pill: Pill | None = None
     pill_edge: str = 'bottom'
+    right_pill: str = ''
 
 
 @dataclass
@@ -1681,39 +1725,66 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     git          = GitInfo.from_cwd(session.cwd)
     line_path    = r.path_git_compact(session.short_pwd, git)
-    line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
     line_context = r.context_line_compact(ctx, width - 3)
 
-    spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
-    combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
+    max_right    = max(8, width // 2)
+    rate_text, right_text, right_w = r.model_right_section_compact(
+        session.model_name, session.rate_limits, max_right, effort_for_bg,
+    )
 
-    if combined is not None:
-        combined_line, div_col = combined
-        pill = Pill(start=div_col, end=div_col + pill_w - 1, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
+    spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
+
+    vsep    = f'  {r.BORDER}│{r.R}  '
+    vsep_w  = 5
+    path_w  = _visible_width(line_path)
+    rate_w  = _visible_width(rate_text)
+
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
+
+    single_row_fits = (path_w + vsep_w + rate_w + right_w) <= (width - 4)
+
+    if single_row_fits:
+        path_div_col = 3 + path_w + 2
+        content = f'{line_path}{vsep}{rate_text}'
+        if pill_pct:
+            top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
+            content_row = RowSpec('content', content=content, right_pill=right_text)
+            sep_row     = RowSpec('separator_dim', ups=(path_div_col,), pill=pill)
+        else:
+            pad = max(1, (width - 3) - (path_w + vsep_w + rate_w + right_w))
+            full = f'{content}{" " * pad}{right_text}'
+            top_row     = RowSpec('top_border', downs=(path_div_col,))
+            content_row = RowSpec('content', content=full)
+            sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
         spec.rows = [
-            RowSpec('top_border', downs=() if pill_w else (div_col,), pill=pill),
-            RowSpec('content', content=combined_line),
-            RowSpec('separator_dim', ups=() if pill_w else (div_col,), pill=pill),
+            top_row,
+            content_row,
+            sep_row,
             RowSpec('content', content=line_context),
             RowSpec('bottom_border'),
         ]
     else:
-        pill = Pill(start=1, end=pill_w, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
         rows: list[RowSpec] = [
             RowSpec('top_border'),
             RowSpec('content', content=line_path),
         ]
-        if pill:
+        if pill_pct:
             rows.append(RowSpec('separator_dim', pill=pill, pill_edge='top'))
+            rows.append(RowSpec('content', content=rate_text, right_pill=right_text))
+            rows.append(RowSpec('separator_dim', pill=pill))
+        else:
+            pad = max(1, (width - 3) - (rate_w + right_w))
+            rows.append(RowSpec('separator_dim'))
+            rows.append(RowSpec('content', content=f'{rate_text}{" " * pad}{right_text}'))
+            rows.append(RowSpec('separator_dim'))
         rows += [
-            RowSpec('content', content=line_model, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
-            RowSpec('separator_dim', pill=pill),
             RowSpec('content', content=line_context),
             RowSpec('bottom_border'),
         ]
@@ -1745,7 +1816,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
     git          = GitInfo.from_cwd(session.cwd)
     line_path    = r.path_git(session.short_pwd, git, elapsed)
-    line_model, model_div_offset = r.model_section(session.model_name, session.model_thinking, session.rate_limits, session.effort.level if session.thinking.enabled else '')
+    helper_text, right_text, right_w = r.model_right_section(
+        session.model_name, session.model_thinking, session.rate_limits,
+        session.effort.level if session.thinking.enabled else '',
+    )
     line_tokens, vsep_cols = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
@@ -1763,45 +1837,46 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
 
-    pill_w_wide = model_div_offset if pill_pct else 0
-    combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
+    vsep    = f'  {r.BORDER}│{r.R}  '
+    vsep_w  = 5
+    path_w  = _visible_width(line_path)
+    helper_w = _visible_width(helper_text)
 
-    if combined is not None:
-        combined_line, top_div_col = combined
-        if pill_w_wide:
-            pill = Pill(start=top_div_col, end=top_div_col + pill_w_wide - 1, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
+
+    single_row_fits = (path_w + vsep_w + helper_w + right_w) <= (width - 4)
+
+    if single_row_fits:
+        path_div_col = 3 + path_w + 2
+        content = f'{line_path}{vsep}{helper_text}'
+        if pill_pct:
             rows += [
-                RowSpec('top_border', downs=(), pill=pill),
-                RowSpec('content', content=combined_line),
+                RowSpec('top_border', downs=(path_div_col,), pill=pill),
+                RowSpec('content', content=content, right_pill=right_text),
             ]
-            next_ups: tuple[int, ...] = ()
         else:
-            model_div_col = top_div_col + 3 + model_div_offset
-            pill = None
+            pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
+            content_full = f'{content}{" " * pad}{right_text}'
             rows += [
-                RowSpec('top_border', downs=(top_div_col, model_div_col)),
-                RowSpec('content', content=combined_line, bg_trail=bg_trail),
+                RowSpec('top_border', downs=(path_div_col,)),
+                RowSpec('content', content=content_full),
             ]
-            next_ups = (top_div_col, model_div_col)
+        next_ups: tuple[int, ...] = (path_div_col,)
     else:
-        if pill_w_wide:
-            pill = Pill(start=1, end=pill_w_wide, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
-            rows += [
-                RowSpec('top_border'),
-                RowSpec('content', content=line_path),
-                RowSpec('separator_dim', pill=pill, pill_edge='top'),
-                RowSpec('content', content=line_model, pill_flush=True),
-            ]
-            next_ups = ()
+        rows += [
+            RowSpec('top_border'),
+            RowSpec('content', content=line_path),
+        ]
+        if pill_pct:
+            rows.append(RowSpec('separator_dim', pill=pill, pill_edge='top'))
+            rows.append(RowSpec('content', content=helper_text, right_pill=right_text))
         else:
-            model_div_col = 3 + model_div_offset
-            pill = None
-            rows += [
-                RowSpec('top_border'),
-                RowSpec('content', content=line_path),
-                RowSpec('content', content=line_model, bg_lead=bg_lead, bg_trail=bg_trail),
-            ]
-            next_ups = (model_div_col,)
+            pad = max(1, (width - 3) - (helper_w + right_w))
+            rows.append(RowSpec('separator_dim'))
+            rows.append(RowSpec('content', content=f'{helper_text}{" " * pad}{right_text}'))
+        next_ups = ()
 
     if plugins_line:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
@@ -1840,7 +1915,7 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
         elif row.kind == 'separator_dim':
             lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge))
         elif row.kind == 'content':
-            lines.append(r.border_line(row.content, spec.width, fill=spec.fill, bg_lead=row.bg_lead, bg_trail=row.bg_trail, pill_flush=row.pill_flush))
+            lines.append(r.border_line(row.content, spec.width, fill=spec.fill, bg_lead=row.bg_lead, bg_trail=row.bg_trail, pill_flush=row.pill_flush, right_pill=row.right_pill))
     return lines
 
 

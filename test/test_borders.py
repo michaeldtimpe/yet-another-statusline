@@ -49,3 +49,32 @@ def test_border_bottom_ups_markers(r: sl.Renderer) -> None:
 def test_border_line_width(r: sl.Renderer) -> None:
     out = r.border_line('hello', width=20)
     assert _visible_width(out) == 20
+
+
+def test_border_line_right_pill_width(r: sl.Renderer) -> None:
+    right_pill = f'{sl.PILL_LEFT}abc{sl.PILL_RIGHT}'
+    out = r.border_line('left', width=30, right_pill=right_pill)
+    assert _visible_width(out) == 30
+    stripped = strip_ansi(out)
+    assert stripped.endswith(sl.PILL_RIGHT)
+    assert sl.PILL_LEFT in stripped
+
+
+def test_border_top_right_flush_pill(r: sl.Renderer) -> None:
+    pill = sl.Pill(start=21, end=30, anchor=(120, 80, 80), shift=(80, 120, 80), pct=100)
+    out = r.border_top(width=30, pill=pill)
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 30
+    assert stripped[20] == sl.PILL_TL
+    assert stripped[29] == sl.PILL_TR
+    assert stripped[0] == '╭'
+
+
+def test_border_separator_dim_right_flush_pill(r: sl.Renderer) -> None:
+    pill = sl.Pill(start=21, end=30, anchor=(120, 80, 80), shift=(80, 120, 80), pct=100)
+    out = r.border_separator_dim(width=30, ups=(5,), pill=pill)
+    stripped = strip_ansi(out)
+    assert _visible_width(out) == 30
+    assert stripped[20] == sl.PILL_BL
+    assert stripped[29] == sl.PILL_BR
+    assert stripped[4] == '┴'
