@@ -101,6 +101,18 @@ GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 
+# Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
+# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
+# peak cell pairs with a "fall" char on the next cell to form a /\ shape.
+SPARK_RISE_SMALL  = '\U0001fb48'  # 🭈 small rise (bot row, idx 1–3)
+SPARK_FALL_SMALL  = '\U0001fb3d'  # 🬽 small fall (bot row, idx 1–3)
+SPARK_RISE_MED    = '\U0001fb4a'  # 🭊 medium rise (bot row, idx 4–7)
+SPARK_FALL_MED    = '\U0001fb3f'  # 🬿 medium fall (bot row, idx 4–7)
+SPARK_RISE_TALL   = '\U0001fb45'  # 🭅 tall rise (bot row, idx 8+)
+SPARK_FALL_TALL   = '\U0001fb50'  # 🭐 tall fall (bot row, idx 8+)
+SPARK_RISE_TOP    = '\U0001fb4b'  # 🭋 top-row rise (idx 9+)
+SPARK_FALL_TOP    = '\U0001fb40'  # 🭀 top-row fall (idx 9+)
+
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block
 PILL_TR    = '▖'  # U+2596 lower-left quadrant
@@ -1030,6 +1042,32 @@ class GradientEngine:
     FADE     = 0.06
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
 
+    SPARK_STOPS = (
+        # (0.00, (110,  35,  30)),
+        # (0.50, (200,  55,  40)),
+        # (1.00, (255, 110,  60)),
+        (0.00, (179, 46, 32)),
+        (0.50, (200,  55,  40)),
+        (1.00, (204,  65,  51)),
+    )
+
+    def spark_rgb(self, t: float) -> tuple[int, int, int]:
+        t = max(0.0, min(1.0, t))
+        for i in range(len(self.SPARK_STOPS) - 1):
+            t0, c0 = self.SPARK_STOPS[i]
+            t1, c1 = self.SPARK_STOPS[i + 1]
+            if t <= t1:
+                u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+                r = int(c0[0] + (c1[0] - c0[0]) * u)
+                g = int(c0[1] + (c1[1] - c0[1]) * u)
+                b = int(c0[2] + (c1[2] - c0[2]) * u)
+                return r, g, b
+        return self.SPARK_STOPS[-1][1]
+
+    def spark_color(self, t: float) -> str:
+        r, g, b = self.spark_rgb(t)
+        return f'\033[38;2;{r};{g};{b}m'
+
     def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
         for i in range(len(self.GRAD_STOPS) - 1):
@@ -1077,24 +1115,61 @@ class GradientEngine:
             parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
+    def _spark_flat(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 8:
+            return ' ', self.SPARK_CHARS[idx - 1]
+        return self.SPARK_CHARS[idx - 9], '█'
+
+    def _spark_rise(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 3:
+            return ' ', SPARK_RISE_SMALL
+        if idx <= 7:
+            return ' ', SPARK_RISE_MED
+        if idx <= 8:
+            return ' ', SPARK_RISE_TALL
+        return SPARK_RISE_TOP, SPARK_RISE_TALL
+
+    def _spark_fall(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 3:
+            return ' ', SPARK_FALL_SMALL
+        if idx <= 7:
+            return ' ', SPARK_FALL_MED
+        if idx <= 8:
+            return ' ', SPARK_FALL_TALL
+        return SPARK_FALL_TOP, SPARK_FALL_TALL
+
     def sparkline(self, history: list[int]) -> tuple[str, str]:
         if not history:
             return '', ''
         max_val = max(history)
+        indices = [
+            min(int(((v / max_val) if max_val > 0 else 0.0) * 16), 16)
+            for v in history
+        ]
         top_parts = []
         bot_parts = []
-        for val in history:
-            ratio = (val / max_val) if max_val > 0 else 0.0
-            idx = min(int(ratio * 16), 16)
-            if idx == 0:
-                top_ch, bot_ch = ' ', self.SPARK_CHARS[0]
-            elif idx <= 8:
-                top_ch, bot_ch = ' ', self.SPARK_CHARS[idx - 1]
+        for i, idx in enumerate(indices):
+            prev_idx = indices[i - 1] if i > 0 else 0
+            if idx > prev_idx:
+                top_ch, bot_ch = self._spark_rise(idx)
+                tint_idx       = idx
+            elif prev_idx > idx:
+                top_ch, bot_ch = self._spark_fall(prev_idx)
+                tint_idx       = prev_idx
             else:
-                top_ch, bot_ch = self.SPARK_CHARS[idx - 9], '█'
-            clr = self.gradient_color(ratio)
-            top_parts.append(f'{clr}{top_ch}{RESET}')
-            bot_parts.append(f'{clr}{bot_ch}{RESET}')
+                top_ch, bot_ch = self._spark_flat(idx)
+                tint_idx       = idx
+            ratio = tint_idx / 16.0
+            bot_clr = self.spark_color(ratio * 0.5)
+            top_clr = self.spark_color(0.5 + ratio * 0.5)
+            top_parts.append(f'{top_clr}{top_ch}{RESET}')
+            bot_parts.append(f'{bot_clr}{bot_ch}{RESET}')
         return ''.join(top_parts), ''.join(bot_parts)
 
 
