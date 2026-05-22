@@ -99,6 +99,7 @@ ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
+GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block
@@ -153,6 +154,54 @@ def _is_wide(ch: str) -> bool:
 def _visible_width(s: str) -> int:
     plain = _ANSI_RE.sub('', s)
     return sum(2 if _is_wide(ch) else 1 for ch in plain)
+
+
+def _middle_ellipsis(text: str, max_w: int) -> str:
+    if max_w <= 1:
+        return '…'
+    if _visible_width(text) <= max_w:
+        return text
+    left_vis  = (max_w - 1) // 2
+    right_vis = max_w - 1 - left_vis
+
+    # Tokenise into (is_escape, string) pairs to preserve ANSI across the cut.
+    tokens: list[tuple[bool, str]] = []
+    i = 0
+    while i < len(text):
+        m = _ANSI_RE.match(text, i)
+        if m:
+            tokens.append((True, m.group()))
+            i = m.end()
+        else:
+            tokens.append((False, text[i]))
+            i += 1
+
+    def _take(toks: list[tuple[bool, str]], n: int) -> list[str]:
+        out: list[str] = []
+        seen = 0
+        for is_esc, tok in toks:
+            if is_esc:
+                out.append(tok)
+            elif seen < n:
+                out.append(tok)
+                seen += 1
+            else:
+                break
+        return out
+
+    prefix = _take(tokens, left_vis)
+    suffix = _take(list(reversed(tokens)), right_vis)
+    suffix.reverse()
+
+    result = ''.join(prefix) + '…' + ''.join(suffix)
+    if _visible_width(result) <= max_w:
+        return result
+    # Trim one visible char from prefix to fix wide-char overshoot.
+    for j in range(len(prefix) - 1, -1, -1):
+        if not _ANSI_RE.fullmatch(prefix[j]):
+            prefix.pop(j)
+            break
+    return ''.join(prefix) + '…' + ''.join(suffix)
 
 
 class TokenAccounting:
@@ -1256,23 +1305,26 @@ class Renderer:
     def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
         return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)
 
-    def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
+    def path_git(
+        self, short_pwd: str, git: GitInfo, elapsed: str = '',
+        *, show_commit: bool = True, show_dirty: bool = True, show_elapsed: bool = True,
+    ) -> str:
         dirty = ''
-        if git.modified > 0:
-            dirty += f'{CLR_WARN}●{git.modified}{RESET}'
-        if git.untracked > 0:
-            dirty += f'{CLR_WARN}*{git.untracked}{RESET}'
-        if dirty:
-            dirty = ' ' + dirty
-        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (elapsed and elapsed != '0m') else ''
+        if show_dirty:
+            if git.modified > 0:
+                dirty += f'{CLR_WARN}●{git.modified}{RESET}'
+            if git.untracked > 0:
+                dirty += f'{CLR_WARN}*{git.untracked}{RESET}'
+            if dirty:
+                dirty = ' ' + dirty
+        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
+        commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
 
         return (
-            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
+            f'{CLR_CYAN_ICON}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
             f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
-            f'{self.LABEL}/{self.R}'
-            f'{self.COMMIT}{git.commit}{self.R}'
-            f'{dirty}{tail}'
+            f'{commit_part}{dirty}{tail}'
         )
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
@@ -1281,6 +1333,46 @@ class Renderer:
             f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
         )
+
+    def fit_path(
+        self, short_pwd: str, git: GitInfo, elapsed: str, target_w: int,
+        *, compact_only: bool = False,
+    ) -> str:
+        def fits(s: str) -> bool:
+            return _visible_width(s) <= target_w
+
+        if not compact_only:
+            for kwargs in (
+                {},
+                {'show_commit': False},
+                {'show_commit': False, 'show_elapsed': False},
+                {'show_commit': False, 'show_elapsed': False, 'show_dirty': False},
+            ):
+                candidate = self.path_git(short_pwd, git, elapsed, **kwargs)
+                if fits(candidate):
+                    return candidate
+
+        compact = self.path_git_compact(short_pwd, git)
+        if fits(compact):
+            return compact
+
+        # Ellipsis on short_pwd only
+        for pwd_w in range(target_w - 1, 0, -1):
+            trunc_pwd = _middle_ellipsis(short_pwd, pwd_w)
+            candidate = self.path_git_compact(trunc_pwd, git)
+            if fits(candidate):
+                return candidate
+
+        # Ellipsis on both short_pwd and branch
+        # Overhead of path_git_compact with empty strings is 5 visible chars.
+        half = max(1, (target_w - 5) // 2)
+        trunc_pwd    = _middle_ellipsis(short_pwd,  half)
+        trunc_branch = _middle_ellipsis(git.branch, half)
+        truncated_git = GitInfo(
+            branch=trunc_branch, commit=git.commit,
+            modified=git.modified, untracked=git.untracked,
+        )
+        return self.path_git_compact(trunc_pwd, truncated_git)
 
     def model_colour(self, model_name: str) -> str:
         m = model_name.lower()
@@ -1700,22 +1792,39 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
-    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
+    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0, 0, 0), (0, 0, 0))
 
-    line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 1 if pill_pct else width - 3, effort_for_bg)
+    max_right    = max(8, width // 2)
+    rate_text, right_text, right_w = r.model_right_section_compact(
+        session.model_name, session.rate_limits, max_right, effort_for_bg,
+    )
     line_context = r.context_line_compact(ctx, width - 3)
-    pill = Pill(start=1, end=pill_w, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
+
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
-    spec.rows = [
-        RowSpec('top_border', pill=pill),
-        RowSpec('content', content=line_model, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
-        RowSpec('separator_dim', pill=pill),
-        RowSpec('content', content=line_context),
-        RowSpec('bottom_border'),
-    ]
+    if pill_pct:
+        spec.rows = [
+            RowSpec('top_border', pill=pill),
+            RowSpec('content', content=rate_text, right_pill=right_text),
+            RowSpec('separator_dim', pill=pill),
+            RowSpec('content', content=line_context),
+            RowSpec('bottom_border'),
+        ]
+    else:
+        rate_w = _visible_width(rate_text)
+        pad    = max(1, (width - 3) - rate_w - right_w)
+        full   = f'{rate_text}{" " * pad}{right_text}'
+        spec.rows = [
+            RowSpec('top_border'),
+            RowSpec('content', content=full),
+            RowSpec('separator_dim'),
+            RowSpec('content', content=line_context),
+            RowSpec('bottom_border'),
+        ]
     return spec
 
 
@@ -1729,7 +1838,6 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     git          = GitInfo.from_cwd(session.cwd)
-    line_path    = r.path_git_compact(session.short_pwd, git)
     line_context = r.context_line_compact(ctx, width - 3)
 
     max_right    = max(8, width // 2)
@@ -1739,56 +1847,36 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
 
-    vsep    = f'  {r.BORDER}│{r.R}  '
-    vsep_w  = 5
-    path_w  = _visible_width(line_path)
-    rate_w  = _visible_width(rate_text)
+    vsep     = f'  {r.BORDER}│{r.R}  '
+    vsep_w   = 5
+    rate_w   = _visible_width(rate_text)
+    target_w = (width - 4) - vsep_w - rate_w - right_w
+    line_path = r.fit_path(session.short_pwd, git, '', target_w, compact_only=True)
+    path_w   = _visible_width(line_path)
 
     pill: Pill | None = None
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
-    single_row_fits = (path_w + vsep_w + rate_w + right_w) <= (width - 4)
-
-    if single_row_fits:
-        path_div_col = 3 + path_w + 2
-        content = f'{line_path}{vsep}{rate_text}'
-        if pill_pct:
-            top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
-            content_row = RowSpec('content', content=content, right_pill=right_text)
-            sep_row     = RowSpec('separator_dim', ups=(path_div_col,), pill=pill)
-        else:
-            pad = max(1, (width - 3) - (path_w + vsep_w + rate_w + right_w))
-            full = f'{content}{" " * pad}{right_text}'
-            top_row     = RowSpec('top_border', downs=(path_div_col,))
-            content_row = RowSpec('content', content=full)
-            sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
-        spec.rows = [
-            top_row,
-            content_row,
-            sep_row,
-            RowSpec('content', content=line_context),
-            RowSpec('bottom_border'),
-        ]
+    path_div_col = 3 + path_w + 2
+    content = f'{line_path}{vsep}{rate_text}'
+    if pill_pct:
+        top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
+        content_row = RowSpec('content', content=content, right_pill=right_text)
+        sep_row     = RowSpec('separator_dim', ups=(path_div_col,), pill=pill)
     else:
-        rows: list[RowSpec] = [
-            RowSpec('top_border'),
-            RowSpec('content', content=line_path),
-        ]
-        if pill_pct:
-            rows.append(RowSpec('separator_dim', pill=pill, pill_edge='top'))
-            rows.append(RowSpec('content', content=rate_text, right_pill=right_text))
-            rows.append(RowSpec('separator_dim', pill=pill))
-        else:
-            pad = max(1, (width - 3) - (rate_w + right_w))
-            rows.append(RowSpec('separator_dim'))
-            rows.append(RowSpec('content', content=f'{rate_text}{" " * pad}{right_text}'))
-            rows.append(RowSpec('separator_dim'))
-        rows += [
-            RowSpec('content', content=line_context),
-            RowSpec('bottom_border'),
-        ]
-        spec.rows = rows
+        pad = max(1, (width - 3) - (path_w + vsep_w + rate_w + right_w))
+        full = f'{content}{" " * pad}{right_text}'
+        top_row     = RowSpec('top_border', downs=(path_div_col,))
+        content_row = RowSpec('content', content=full)
+        sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
+    spec.rows = [
+        top_row,
+        content_row,
+        sep_row,
+        RowSpec('content', content=line_context),
+        RowSpec('bottom_border'),
+    ]
     return spec
 
 
@@ -1815,7 +1903,6 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
     git          = GitInfo.from_cwd(session.cwd)
-    line_path    = r.path_git(session.short_pwd, git, elapsed)
     helper_text, right_text, right_w = r.model_right_section(
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
@@ -1837,46 +1924,32 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
 
-    vsep    = f'  {r.BORDER}│{r.R}  '
-    vsep_w  = 5
-    path_w  = _visible_width(line_path)
+    vsep     = f'  {r.BORDER}│{r.R}  '
+    vsep_w   = 5
     helper_w = _visible_width(helper_text)
+    target_w = (width - 4) - vsep_w - helper_w - right_w
+    line_path = r.fit_path(session.short_pwd, git, elapsed, target_w, compact_only=False)
+    path_w   = _visible_width(line_path)
 
     pill: Pill | None = None
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
-    single_row_fits = (path_w + vsep_w + helper_w + right_w) <= (width - 4)
-
-    if single_row_fits:
-        path_div_col = 3 + path_w + 2
-        content = f'{line_path}{vsep}{helper_text}'
-        if pill_pct:
-            rows += [
-                RowSpec('top_border', downs=(path_div_col,), pill=pill),
-                RowSpec('content', content=content, right_pill=right_text),
-            ]
-        else:
-            pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
-            content_full = f'{content}{" " * pad}{right_text}'
-            rows += [
-                RowSpec('top_border', downs=(path_div_col,)),
-                RowSpec('content', content=content_full),
-            ]
-        next_ups: tuple[int, ...] = (path_div_col,)
-    else:
+    path_div_col = 3 + path_w + 2
+    content = f'{line_path}{vsep}{helper_text}'
+    if pill_pct:
         rows += [
-            RowSpec('top_border'),
-            RowSpec('content', content=line_path),
+            RowSpec('top_border', downs=(path_div_col,), pill=pill),
+            RowSpec('content', content=content, right_pill=right_text),
         ]
-        if pill_pct:
-            rows.append(RowSpec('separator_dim', pill=pill, pill_edge='top'))
-            rows.append(RowSpec('content', content=helper_text, right_pill=right_text))
-        else:
-            pad = max(1, (width - 3) - (helper_w + right_w))
-            rows.append(RowSpec('separator_dim'))
-            rows.append(RowSpec('content', content=f'{helper_text}{" " * pad}{right_text}'))
-        next_ups = ()
+    else:
+        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
+        content_full = f'{content}{" " * pad}{right_text}'
+        rows += [
+            RowSpec('top_border', downs=(path_div_col,)),
+            RowSpec('content', content=content_full),
+        ]
+    next_ups: tuple[int, ...] = (path_div_col,)
 
     if plugins_line:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))

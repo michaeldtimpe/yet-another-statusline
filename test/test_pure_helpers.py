@@ -167,3 +167,47 @@ class TestRainbowAt:
         idx = (step + offset) % palette_len
         expected = f'\033[38;5;{sl.RAINBOW_PALETTE[idx]}m'
         assert sl.rainbow_at(step, offset) == expected
+
+
+# ---------------------------------------------------------------------------
+# 2.7  _middle_ellipsis
+# ---------------------------------------------------------------------------
+
+class TestMiddleEllipsis:
+    def test_fits_no_truncation(self) -> None:
+        assert sl._middle_ellipsis('hello', 10) == 'hello'
+
+    def test_exact_fit(self) -> None:
+        assert sl._middle_ellipsis('hello', 5) == 'hello'
+
+    def test_ascii_truncates_width_respected(self) -> None:
+        result = sl._middle_ellipsis('abcdefghij', 7)
+        assert sl._visible_width(result) <= 7
+        assert '…' in result
+
+    def test_ascii_truncates_contains_both_ends(self) -> None:
+        result = sl._middle_ellipsis('abcdefghij', 7)
+        assert result.startswith('abc')
+        assert result.endswith('ij')
+
+    def test_edge_max_w_0(self) -> None:
+        assert sl._middle_ellipsis('hello', 0) == '…'
+
+    def test_edge_max_w_1(self) -> None:
+        assert sl._middle_ellipsis('hello', 1) == '…'
+
+    def test_edge_max_w_2(self) -> None:
+        result = sl._middle_ellipsis('hello', 2)
+        assert sl._visible_width(result) <= 2
+        assert '…' in result
+
+    def test_ansi_wrapped_visible_width_respected(self) -> None:
+        colored = '\x1b[31m' + 'abcdefghij' + '\x1b[0m'
+        result = sl._middle_ellipsis(colored, 7)
+        assert sl._visible_width(result) <= 7
+        assert '…' in result
+
+    def test_ansi_wrapped_escapes_preserved(self) -> None:
+        colored = '\x1b[31m' + 'abcdefghij' + '\x1b[0m'
+        result = sl._middle_ellipsis(colored, 7)
+        assert '\x1b[' in result
