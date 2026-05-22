@@ -2,6 +2,7 @@
 'Claude Code statusLine command (Python port).'
 
 from __future__ import annotations
+import importlib.util
 import json
 import os
 import re
@@ -13,6 +14,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+
+
+# Load the themes module via importlib because this script runs as a top-level
+# file (not inside a package). The same shim is used by test/conftest.py.
+_THEMES_PATH = Path(__file__).resolve().parent / 'statusline' / 'themes.py'
+_themes_spec = importlib.util.spec_from_file_location('statusline_themes', _THEMES_PATH)
+assert _themes_spec is not None and _themes_spec.loader is not None
+themes = importlib.util.module_from_spec(_themes_spec)
+sys.modules['statusline_themes'] = themes
+_themes_spec.loader.exec_module(themes)
+Theme        = themes.Theme
+ModelColors  = themes.ModelColors
+THEMES       = themes.THEMES
+CLAUDE_DARK  = themes.CLAUDE_DARK
 
 
 class BarChars:
@@ -102,6 +117,7 @@ ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
+GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
 
 # Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
 # Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
@@ -920,27 +936,6 @@ def rainbow_color() -> str:
     return rainbow_at(rainbow_step())
 
 
-ANCHOR_RGB = {
-    'opus':   (255, 255,   0),
-    'sonnet': (135, 215, 135),
-    'haiku':  ( 95, 175, 255),
-    'other':  (215, 175, 255),
-}
-
-SHIFT_WARM = {
-    'opus':   (255, 165,   0),
-    'sonnet': ( 44, 208, 168),
-    'haiku':  (123, 230, 255),
-    'other':  (240, 165, 224),
-}
-
-SHIFT_COOL = {
-    'opus':   (180, 230,  60),
-    'sonnet': ( 44, 140,  80),
-    'haiku':  ( 74, 110, 224),
-    'other':  (138, 111, 214),
-}
-
 LEVEL_PCT = {
     'low':    30,
     'medium': 55,
@@ -967,7 +962,9 @@ def _scale(rgb: tuple[int, int, int], pct: int) -> tuple[int, int, int]:
 def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]],
                   anchor: tuple[int, int, int],
                   shift: tuple[int, int, int],
-                  pct: int) -> str:
+                  pct: int,
+                  pill_fg_dark:  tuple[int, int, int] = (15, 15, 15),
+                  pill_fg_light: tuple[int, int, int] | None = None) -> str:
     c0 = _scale(anchor, pct)
     c1 = _scale(shift, pct)
     n = max(1, len(cells) - 1)
@@ -980,7 +977,12 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
         g = int(c0[1] + (c1[1] - c0[1]) * t)
         b = int(c0[2] + (c1[2] - c0[2]) * t)
         lum = (r * 299 + g * 587 + b * 114) // 1000
-        fg_rgb = (15, 15, 15) if lum >= BG_LUM_THRESHOLD else (fg if fg is not None else None)
+        if lum >= BG_LUM_THRESHOLD:
+            fg_rgb = pill_fg_dark
+        elif pill_fg_light is not None:
+            fg_rgb = pill_fg_light
+        else:
+            fg_rgb = fg if fg is not None else None
         cur_bg = (r, g, b)
         if cur_bg != prev_bg:
             parts.append(f'\033[48;2;{r};{g};{b}m')
@@ -1030,25 +1032,16 @@ def _short_agent_name(agent_type: str, description: str) -> str:
 
 
 class GradientEngine:
-    GRAD_STOPS = (
-        (0.00, ( 40, 210,  80)),  # green
-        (0.25, (240, 230,  20)),  # yellow
-        (0.50, (255, 140,  20)),  # orange
-        (0.75, (220,  40,  50)),  # red
-        (1.00, (170,  60, 210)),  # purple
-    )
-    GREY_RGB = (108, 108, 108)
-    FADE     = 0.06
+    FADE        = 0.06
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
 
-    SPARK_STOPS = (
-        # (0.00, (110,  35,  30)),
-        # (0.50, (200,  55,  40)),
-        # (1.00, (255, 110,  60)),
-        (0.00, (179, 46, 32)),
-        (0.50, (200,  55,  40)),
-        (1.00, (204,  65,  51)),
-    )
+    def __init__(self, theme: Theme | None = None) -> None:
+        t = theme if theme is not None else CLAUDE_DARK
+        self.theme       = t
+        self.GRAD_STOPS  = t.grad_stops
+        self.GREY_RGB    = t.grey_rgb
+        self.SPARK_STOPS = t.spark_stops
+        self.BORDER_OFF  = t.border_off
 
     def spark_rgb(self, t: float) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
@@ -1089,12 +1082,12 @@ class GradientEngine:
         denom = max(1, width - 1)
         t = col / denom
         if fill <= 0:
-            return CLR_BORDER_OFF
+            return self.BORDER_OFF
         fade = self.FADE
         if t <= fill - fade:
             return self.gradient_color(t, dim)
         if t >= fill + fade:
-            return CLR_BORDER_OFF
+            return self.BORDER_OFF
         er, eg, eb = self.gradient_rgb(min(t, fill), dim)
         gr, gg, gb = self.GREY_RGB
         u = max(0.0, min(1.0, (t - (fill - fade)) / (2 * fade)))
@@ -1175,9 +1168,9 @@ class GradientEngine:
 class BorderRenderer:
     def __init__(self, gradient: GradientEngine):
         self.gradient = gradient
+        self.SESSION  = gradient.theme.session
 
-    R       = RESET
-    SESSION = CLR_GREY_DIM
+    R = RESET
 
     def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
         downs_set = set(downs)
@@ -1299,22 +1292,58 @@ class BorderRenderer:
 
 
 class Renderer:
-    def __init__(self, bg_shift: str = 'warm'):
+    def __init__(self, bg_shift: str = 'warm', theme: Theme | None = None) -> None:
         self.bg_shift = bg_shift if bg_shift in ('warm', 'cool') else 'warm'
-        self.gradient = GradientEngine()
-        self.border = BorderRenderer(self.gradient)
+        self.theme    = theme if theme is not None else CLAUDE_DARK
+        self.gradient = GradientEngine(self.theme)
+        self.border   = BorderRenderer(self.gradient)
+        self._apply_theme(self.theme)
 
-    def _bg_shift_table(self) -> dict:
-        return SHIFT_WARM if self.bg_shift == 'warm' else SHIFT_COOL
+    def _apply_theme(self, t: Theme) -> None:
+        self.BORDER      = t.border
+        self.PWD         = t.pwd
+        self.BRANCH      = t.branch
+        self.COMMIT      = t.commit
+        self.SESSION     = t.session
+        self.MODEL       = t.model
+        self.SKILLS      = t.skills
+        self.TIME        = t.time
+        self.TOK         = t.tok
+        self.TOK_DIM     = t.tok_dim
+        self.TOK_DAY     = t.tok_day
+        self.TOK_DAY_DIM = t.tok_day_dim
+        self.COST        = t.cost
+        self.BAR_FILL    = t.bar_fill
+        self.BAR_EMPTY   = t.bar_empty
+        self.DIM_GREEN   = t.dim_green
+        self.LABEL       = t.label
+        self.CTX         = t.ctx
+        self.BOLDW       = BOLD + t.white_brt
+        self.BOLDY       = t.tok_arrow
+        self.DIRTY       = t.dirty
+        self.ICON_PATH   = t.icon_path
+        self.ARROW       = t.arrow
+        self.TOK_ICON    = t.tok_icon
+        self.OPUS        = t.models['opus'].label
+        self.SONNET      = t.models['sonnet'].label
+        self.HAIKU       = t.models['haiku'].label
+        self.safe        = t.safe
+        self.warn        = t.warn
+        self.alert       = t.alert
+        self.yellow      = t.yellow
+        self.white_brt   = t.white_brt
+        self.pill_fg_dark    = t.pill_fg_dark
+        self.pill_fg_light   = t.pill_fg_light
+        self.SPEC_GRADIENTS  = t.spec_gradients
+        self.spec_empty_ansi = t.spec_empty_ansi
 
     def _model_bg_pct(self, effort_level: str) -> int:
         return LEVEL_PCT.get(effort_level.lower(), 0)
 
     def _model_anchor_pair(self, model_name: str) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
-        key    = model_key(model_name)
-        anchor = ANCHOR_RGB[key]
-        shift  = self._bg_shift_table()[key]
-        return anchor, shift
+        mc    = self.theme.models[model_key(model_name)]
+        shift = mc.warm_shift if self.bg_shift == 'warm' else mc.cool_shift
+        return mc.anchor, shift
 
     def model_bg_lead(self, model_name: str, effort_level: str) -> str:
         pct = self._model_bg_pct(effort_level)
@@ -1362,8 +1391,9 @@ class Renderer:
     HAIKU     = CLR_SKY_BLUE
 
     # --- Gradient delegations (backward compat) ---
-    GRAD_STOPS  = GradientEngine.GRAD_STOPS
-    GREY_RGB    = GradientEngine.GREY_RGB
+    # GRAD_STOPS / GREY_RGB / SPARK_STOPS now live on the GradientEngine
+    # instance (driven by the active Theme). The legacy class-level constants
+    # are gone; callers reach them via r.gradient.GRAD_STOPS etc.
     FADE        = GradientEngine.FADE
     SPARK_CHARS = GradientEngine.SPARK_CHARS
 
@@ -1410,25 +1440,25 @@ class Renderer:
         dirty = ''
         if show_dirty:
             if git.modified > 0:
-                dirty += f'{CLR_WARN}●{git.modified}{RESET}'
+                dirty += f'{self.DIRTY}●{git.modified}{RESET}'
             if git.untracked > 0:
-                dirty += f'{CLR_WARN}*{git.untracked}{RESET}'
+                dirty += f'{self.DIRTY}*{git.untracked}{RESET}'
             if dirty:
                 dirty = ' ' + dirty
         tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
         commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
 
         return (
-            f'{CLR_CYAN_ICON}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
             f'{commit_part}{dirty}{tail}'
         )
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
-            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
         )
 
@@ -1473,28 +1503,21 @@ class Renderer:
         return self.path_git_compact(trunc_pwd, truncated_git)
 
     def model_colour(self, model_name: str) -> str:
-        m = model_name.lower()
-        if 'opus' in m:
-            return CLR_YELLOW
-        if 'sonnet' in m:
-            return CLR_GREEN_OK
-        if 'haiku' in m:
-            return CLR_SKY_BLUE
-        return CLR_PURPLE
+        return self.theme.models[model_key(model_name)].label
 
     def fill_colour(self, pct: float) -> str:
         if pct >= 90:
-            return CLR_ALERT
+            return self.alert
         if pct >= 70:
-            return CLR_WARN
-        return CLR_GREEN_OK
+            return self.warn
+        return self.safe
 
     def day_cost_colour(self, cost: float) -> str:
         if cost > 50:
-            return CLR_ALERT
+            return self.alert
         if cost >= 25:
-            return CLR_YELLOW
-        return CLR_GREEN_OK
+            return self.yellow
+        return self.safe
 
     def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> tuple[str, int]:
         model_clr = self.model_colour(model_name)
@@ -1531,7 +1554,7 @@ class Renderer:
                 cells.append((' ', anchor, False, False))
                 pill_l = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
                 pill_r = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
-                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg) + pill_r + RESET
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
                 pw = _visible_width(painted)
                 return (
                     f'{painted}'
@@ -1581,7 +1604,7 @@ class Renderer:
             cells.append((' ', anchor, False, False))
             pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
             pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
-            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct) + pill_r + RESET
+            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
         elif model_thinking:
             right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{GLYPH_THINKING}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
         else:
@@ -1589,7 +1612,7 @@ class Renderer:
 
         right_w = _visible_width(right_text)
 
-        helper_text = f'{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
+        helper_text = f'{c_helper}{BOLD}{self.R} {self.white_brt}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
@@ -1628,7 +1651,7 @@ class Renderer:
                 cells.append((' ', anchor, False, False))
                 pill_l  = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
                 pill_r  = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
-                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg) + pill_r + RESET
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
                 return painted, _visible_width(painted)
             text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
             return text, _visible_width(text)
@@ -1652,7 +1675,7 @@ class Renderer:
             extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         if subagents:
             names = ','.join((_short_agent_name(t, d)) for t, d in subagents)
-            extras.append(f'{c_subagent}{BOLD}  {self.R}{CLR_PEACH}{names}{self.R}')
+            extras.append(f'{c_subagent}{BOLD}{GLYPH_SUBAGENT}  {self.R}{self.CTX}{names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
 
     RATE_W  = 6
@@ -1680,7 +1703,7 @@ class Renderer:
         cost2 = f'${day_cost:,.2f}'
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
 
-        end1 = f'{CLR_GREEN_OK}{ICON_COST}{self.R}{self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end1 = f'{self.safe}{ICON_COST}{self.R}{self.COST}{cost1.rjust(cost_width)}{self.R}'
         end2 = f' {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
         label_w = 15
@@ -1695,7 +1718,7 @@ class Renderer:
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
         # bar_w = leader_w - label_w
 
-        rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
+        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
         rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
         bar_w = leader_w - rate_label_w
@@ -1724,21 +1747,21 @@ class Renderer:
         bar_filled = BarChars.FILLED * filled
         bar_empty = BarChars.EMPTY * (30 - filled)
         if ratio >= 0.9:
-            color = CLR_ALERT
+            color = self.alert
         elif ratio >= 0.7:
-            color = CLR_WARN
+            color = self.warn
         else:
-            color = CLR_GREEN_OK
+            color = self.safe
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
 
     def context_bar_color(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
         if ratio >= 0.9:
-            return CLR_ALERT
+            return self.alert
         elif ratio >= 0.7:
-            return CLR_WARN
+            return self.warn
         else:
-            return CLR_GREEN_OK
+            return self.safe
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
@@ -1746,7 +1769,7 @@ class Renderer:
         pct_soft     = total_tokens / SOFT_LIMIT * 100
 
         if total_tokens >= SOFT_LIMIT:
-            a = BOLD + CLR_ALERT
+            a = BOLD + self.alert
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
@@ -1777,7 +1800,7 @@ class Renderer:
         pct_soft     = total_tokens / SOFT_LIMIT * 100
 
         if total_tokens >= SOFT_LIMIT:
-            a      = BOLD + CLR_ALERT
+            a      = BOLD + self.alert
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
@@ -1845,7 +1868,7 @@ class Renderer:
             r, g, b = int(c_last[0] * 0.45), int(c_last[1] * 0.45), int(c_last[2] * 0.45)
             bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
             empty -= 1
-        bar_empty = f'\033[38;5;233m{BarChars.HEAVY * empty}\033[0m'
+        bar_empty = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
 
         return (
             f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
@@ -2098,8 +2121,25 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
     return lines
 
 
+def resolve_theme(cli_name: str | None) -> Theme:
+    """Layered theme selection: CLI → env → config file → CLAUDE_DARK."""
+    if cli_name and cli_name in THEMES:
+        return THEMES[cli_name]
+    env = os.environ.get('CLAUDE_STATUSLINE_THEME', '').strip()
+    if env in THEMES:
+        return THEMES[env]
+    try:
+        cfg = (HOME / '.claude' / 'statusline-theme').read_text().strip()
+        if cfg in THEMES:
+            return THEMES[cfg]
+    except OSError:
+        pass
+    return CLAUDE_DARK
+
+
 def main() -> None:
-    bg_shift = 'warm'
+    bg_shift   = 'warm'
+    theme_name: str | None = None
     args = sys.argv[1:]
     while args:
         a = args.pop(0)
@@ -2111,10 +2151,15 @@ def main() -> None:
             v = a.split('=', 1)[1].lower()
             if v in ('warm', 'cool'):
                 bg_shift = v
+        elif a == '--theme' and args:
+            theme_name = args.pop(0)
+        elif a.startswith('--theme='):
+            theme_name = a.split('=', 1)[1]
 
     info    = json.loads(sys.stdin.read())
     session = SessionInfo.from_dict(info)
-    r       = Renderer(bg_shift=bg_shift)
+    theme   = resolve_theme(theme_name)
+    r       = Renderer(bg_shift=bg_shift, theme=theme)
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:

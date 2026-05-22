@@ -35,8 +35,21 @@ _Avoid_: "context full" — the bar can be 15% full on a 1M-context model and st
 The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
 _Avoid_: "thinking level" (overloaded — the *level* names a setting, the *effort* names the resource it spends).
 
-**Hue shift**:
-The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's foreground colour. Selectable via `--bg-shift {warm,cool}`. `warm` is the default.
+**Anchor**:
+The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
+
+**Shift**:
+The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's **Anchor**. Each theme provides both a warm and a cool **Shift** table; `--bg-shift {warm,cool}` selects which is used. `warm` is the default.
+_Avoid_: "hue shift" (was the earlier term; **Shift** is canonical and matches the `_shift` slot names in the theme dataclass).
+
+### Theming
+
+**Theme**:
+The complete set of colour decisions the statusline draws with — decorative slots (border, path, branch, helper, label), the compaction traffic-light ladder, the rainbow border gradient stops, the per-model **Anchor** + warm/cool **Shift** tables, and the two **Pill Foreground** slots. Lives as a `Theme` dataclass instance in `claude/statusline/themes.py`. Selected at runtime via `--theme=name`, `CLAUDE_STATUSLINE_THEME`, or `~/.claude/statusline-theme` — in that priority order, falling back to `claude-dark`. See [docs/adr/0002-theme-system.md](docs/adr/0002-theme-system.md).
+_Avoid_: "palette" as a synonym (a palette is a *source* — Catppuccin Latte, Solarized Light — and a **Theme** is the fully populated dataclass derived from one).
+
+**Pill Foreground**:
+The text colour painted on top of the model-pill background. Two slots per theme: `pill_fg_dark` (used when the per-cell background luminance is above `BG_LUM_THRESHOLD`) and `pill_fg_light` (used below). Replaces the earlier rule that defaulted the foreground to the **Anchor** itself — that rule only worked because every shipped **Anchor** was bright.
 
 ### Rate limits
 
