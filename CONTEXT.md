@@ -57,6 +57,22 @@ The text colour painted on top of the model-pill background. Two slots per theme
 A subagent whose transcript jsonl was written to within the last 20 seconds. Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
 _Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
 
+### Task tracking
+
+**Task**:
+A checkpoint in the main agent's plan-of-work, created by a `TaskCreate` tool call in the session transcript jsonl. Each carries a `subject`, an `activeForm` (present-continuous phrasing, e.g. `"Adding fmt_dur helper"`), an optional `description`, and a status (`pending` → `in_progress` → `completed`). IDs are assigned sequentially `#1..#N` by the harness in creation order. Reconstructed by event-folding `TaskCreate` + `TaskUpdate` lines in the session jsonl.
+_Avoid_: "todo" (overloaded with editor TODO comments and chat-side checklists).
+
+**Active Task**:
+The (at most one) **Task** currently in `in_progress`. Drives the text shown on the **Task Row**'s right side.
+
+**Task Row**:
+The statusline row that summarises **Task** progress. Format: glyph + `<completed>/<total>` count + **Active Task** `activeForm`. Sits between the plugins/skills row and the subagent rows — narrative position is *planned activity* (above the *live activity* of running subagents). Sourced from the main session jsonl only; subagent transcripts are intentionally out of scope so the count is never ambiguous about whose plan it represents. Plan-mode plans (markdown blobs from `ExitPlanMode`) are also out of scope — they're unstructured prose with no per-bullet state.
+
+**Task Freshness Cap**:
+The 2-minute staleness limit on the **Task Row**. If the most recent `TaskCreate` / `TaskUpdate` event in the session jsonl is older than 2 minutes, the row hides even if non-completed tasks remain — defending against the known stale-list problem where the agent moves on to unrelated work without cleaning up. The row reappears the moment a new task event lands. Distinct from the 20-second post-update grace window, which keeps the row visible briefly after everything flips to `completed` so the "done" beat is readable. See [docs/adr/0004-task-progress-row.md](docs/adr/0004-task-progress-row.md).
+_Avoid_: "task TTL" (suggests the tasks themselves expire — they don't, only the row's visibility does).
+
 ### Rate limits
 
 **Five-Hour Limit**:

@@ -119,6 +119,7 @@ GLYPH_THINKING = '\U000f1a53' # nf-md-brain
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
 GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
+GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
 GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
 GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
 GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
@@ -871,6 +872,112 @@ def _parse_iso_to_epoch(ts: str) -> float:
         return datetime.fromisoformat(ts).timestamp()
     except (ValueError, TypeError):
         return 0.0
+
+
+@dataclass
+class Task:
+    id: int
+    subject: str
+    active_form: str
+    status: str  # 'pending' | 'in_progress' | 'completed'
+
+
+@dataclass
+class TaskList:
+    tasks: list[Task] = field(default_factory=list)
+    last_event_ts: float = 0.0
+
+    FRESHNESS_CAP = 120.0  # 2 min — see docs/adr/0004
+    GRACE_SECONDS = 20.0   # matches RunningSubagents.STALE_SECONDS
+
+    @classmethod
+    def from_session(cls, transcript_path: str) -> TaskList:
+        if not transcript_path:
+            return cls()
+        path = Path(transcript_path)
+        if not path.is_file():
+            return cls()
+        by_id: dict[int, Task] = {}
+        next_id = 1
+        last_ts = 0.0
+        try:
+            with path.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if '"TaskCreate"' not in ln and '"TaskUpdate"' not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except ValueError:
+                        continue
+                    ts = _parse_iso_to_epoch(d.get('timestamp', ''))
+                    content = d.get('message', {}).get('content', [])
+                    if not isinstance(content, list):
+                        continue
+                    for c in content:
+                        if not isinstance(c, dict) or c.get('type') != 'tool_use':
+                            continue
+                        name = c.get('name', '')
+                        inp  = c.get('input') or {}
+                        if name == 'TaskCreate':
+                            subj = inp.get('subject', '') or ''
+                            af   = inp.get('activeForm', '') or subj
+                            by_id[next_id] = Task(id=next_id, subject=subj, active_form=af, status='pending')
+                            next_id += 1
+                            if ts > last_ts: last_ts = ts
+                        elif name == 'TaskUpdate':
+                            try:
+                                tid = int(inp.get('taskId', '0'))
+                            except (TypeError, ValueError):
+                                continue
+                            t = by_id.get(tid)
+                            if not t:
+                                continue
+                            new_status = inp.get('status')
+                            if new_status in ('pending', 'in_progress', 'completed'):
+                                t.status = new_status
+                            if 'activeForm' in inp and inp['activeForm']:
+                                t.active_form = inp['activeForm']
+                            if 'subject' in inp and inp['subject']:
+                                t.subject = inp['subject']
+                            if ts > last_ts: last_ts = ts
+        except OSError:
+            return cls()
+        tasks = [by_id[k] for k in sorted(by_id.keys())]
+        return cls(tasks=tasks, last_event_ts=last_ts)
+
+    @property
+    def total(self) -> int:
+        return len(self.tasks)
+
+    @property
+    def completed(self) -> int:
+        return sum(1 for t in self.tasks if t.status == 'completed')
+
+    @property
+    def active(self) -> Task | None:
+        for t in reversed(self.tasks):
+            if t.status == 'in_progress':
+                return t
+        return None
+
+    @property
+    def next_pending(self) -> Task | None:
+        for t in self.tasks:
+            if t.status == 'pending':
+                return t
+        return None
+
+    def is_visible(self, now: float | None = None) -> bool:
+        if not self.tasks or self.last_event_ts <= 0:
+            return False
+        if now is None:
+            now = time.time()
+        age = now - self.last_event_ts
+        if age > self.FRESHNESS_CAP:
+            return False
+        if self.completed == self.total:
+            return age <= self.GRACE_SECONDS
+        return True
 
 
 @dataclass
@@ -1786,6 +1893,37 @@ class Renderer:
         pad_w  = max(1, target_w - left_w - right_w)
         return f'{left_text}{" " * pad_w}{right_text}'
 
+    def task_row(self, tasks: TaskList, width: int, compact: bool = False) -> str:
+        step    = rainbow_step()
+        c_glyph = rainbow_at(step, 9)
+        done    = tasks.completed
+        total   = tasks.total
+        count_s = f'{done}/{total}'
+
+        head = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}  {self.SKILLS}{count_s}{self.R}'
+        if compact:
+            return head
+
+        if done == total:
+            text = ''
+        else:
+            active = tasks.active
+            if active is not None:
+                text = active.active_form or active.subject
+            else:
+                nxt = tasks.next_pending
+                text = nxt.subject if nxt else ''
+
+        if not text:
+            return head
+
+        target_w = width - 4
+        head_w   = 3 + len(count_s) + 2  # glyph + '  ' + count + '  '
+        budget   = max(0, target_w - head_w)
+        if len(text) > budget:
+            text = (text[:budget - 1] + '…') if budget > 0 else ''
+        return f'{head}  {self.CTX}{text}{self.R}'
+
     RATE_W  = 6
     IN_W    = 6
     CACHE_W = 6
@@ -2107,13 +2245,14 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         top_row     = RowSpec('top_border', downs=(path_div_col,))
         content_row = RowSpec('content', content=full)
         sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
-    spec.rows = [
-        top_row,
-        content_row,
-        sep_row,
-        RowSpec('content', content=line_context),
-        RowSpec('bottom_border'),
-    ]
+    tasks = TaskList.from_session(session.transcript_path)
+    rows: list[RowSpec] = [top_row, content_row, sep_row]
+    if tasks.is_visible():
+        rows.append(RowSpec('content', content=r.task_row(tasks, width, compact=True)))
+        rows.append(RowSpec('separator_dim'))
+    rows.append(RowSpec('content', content=line_context))
+    rows.append(RowSpec('bottom_border'))
+    spec.rows = rows
     return spec
 
 
@@ -2137,6 +2276,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     sess_cost     = compute_session_cost(session.model, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
+    tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
     git          = GitInfo.from_cwd(session.cwd)
@@ -2195,6 +2335,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim', ups=next_ups))
     else:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
+
+    if tasks.is_visible():
+        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
+        rows.append(RowSpec('separator_dim'))
 
     if subagents.subagents:
         for sub in subagents.subagents:
