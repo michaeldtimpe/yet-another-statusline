@@ -68,3 +68,24 @@ def test_grad_at_start_of_full_bar() -> None:
 def test_grad_at_past_zero_fill() -> None:
     # fill=0.0 → fill <= 0 → CLR_BORDER_OFF immediately
     assert _r.grad_at(9, width=10, fill=0.0) == sl.CLR_BORDER_OFF
+
+
+# ---------------------------------------------------------------------------
+# spark_rgb dim factor
+# ---------------------------------------------------------------------------
+
+def test_spark_rgb_dim_half() -> None:
+    """spark_rgb(t, dim=0.5) == (int(R*0.5), int(G*0.5), int(B*0.5))."""
+    r, g, b = _r.spark_rgb(0.7)
+    assert _r.spark_rgb(0.7, dim=0.5) == (int(r * 0.5), int(g * 0.5), int(b * 0.5))
+
+
+def test_spark_rgb_dim_zero() -> None:
+    """spark_rgb(t, dim=0.0) == (0, 0, 0) for any t."""
+    assert _r.spark_rgb(0.3, dim=0.0) == (0, 0, 0)
+    assert _r.spark_rgb(0.7, dim=0.0) == (0, 0, 0)
+
+
+def test_spark_color_dim_one_matches_default() -> None:
+    """spark_color(t, dim=1.0) is byte-identical to spark_color(t)."""
+    assert _r.spark_color(0.5) == _r.spark_color(0.5, dim=1.0)

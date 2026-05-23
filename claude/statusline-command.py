@@ -124,6 +124,9 @@ GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
 GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
 GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
 
+# Dim factor for the in-flight (currently-open) sparkline bucket.
+LIVE_DIM = 0.5
+
 # Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
 # Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
 # peak cell pairs with a "fall" char on the next cell to form a /\ shape.
@@ -617,13 +620,14 @@ class TokenRate:
                     to = int(parts[3])
                 except ValueError:
                     continue
-                if sid == session_id and now - ts <= window:
+                if sid == session_id and now - ts <= window + window / n_buckets:
                     samples.append((ts, ti, to))
         if len(samples) < 2:
             return [0] * n_buckets
         samples.sort()
         bucket_size = window / n_buckets
-        start = now - window
+        last_bucket  = int(now // bucket_size)
+        first_bucket = last_bucket - n_buckets + 1
         buckets = [0] * n_buckets
         for i in range(len(samples) - 1):
             ts0, ti0, to0 = samples[i]
@@ -632,9 +636,9 @@ class TokenRate:
             if delta == 0:
                 continue
             midpoint = (ts0 + ts1) / 2
-            idx = int((midpoint - start) / bucket_size)
-            idx = max(0, min(n_buckets - 1, idx))
-            buckets[idx] += delta
+            abs_bucket = int(midpoint // bucket_size)
+            if first_bucket <= abs_bucket <= last_bucket:
+                buckets[abs_bucket - first_bucket] += delta
         return buckets
 
 
@@ -1220,21 +1224,22 @@ class GradientEngine:
         self.SPARK_STOPS = t.spark_stops
         self.BORDER_OFF  = t.border_off
 
-    def spark_rgb(self, t: float) -> tuple[int, int, int]:
+    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
         for i in range(len(self.SPARK_STOPS) - 1):
             t0, c0 = self.SPARK_STOPS[i]
             t1, c1 = self.SPARK_STOPS[i + 1]
             if t <= t1:
                 u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
-                r = int(c0[0] + (c1[0] - c0[0]) * u)
-                g = int(c0[1] + (c1[1] - c0[1]) * u)
-                b = int(c0[2] + (c1[2] - c0[2]) * u)
+                r = int((c0[0] + (c1[0] - c0[0]) * u) * dim)
+                g = int((c0[1] + (c1[1] - c0[1]) * u) * dim)
+                b = int((c0[2] + (c1[2] - c0[2]) * u) * dim)
                 return r, g, b
-        return self.SPARK_STOPS[-1][1]
+        r, g, b = self.SPARK_STOPS[-1][1]
+        return int(r * dim), int(g * dim), int(b * dim)
 
-    def spark_color(self, t: float) -> str:
-        r, g, b = self.spark_rgb(t)
+    def spark_color(self, t: float, dim: float = 1.0) -> str:
+        r, g, b = self.spark_rgb(t, dim)
         return f'\033[38;2;{r};{g};{b}m'
 
     def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
@@ -1313,7 +1318,7 @@ class GradientEngine:
             return ' ', SPARK_FALL_TALL
         return SPARK_FALL_TOP, SPARK_FALL_TALL
 
-    def sparkline(self, history: list[int]) -> tuple[str, str]:
+    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
         if not history:
             return '', ''
         max_val = max(history)
@@ -1321,6 +1326,7 @@ class GradientEngine:
             min(int(((v / max_val) if max_val > 0 else 0.0) * 16), 16)
             for v in history
         ]
+        last_i  = len(indices) - 1
         top_parts = []
         bot_parts = []
         for i, idx in enumerate(indices):
@@ -1334,9 +1340,15 @@ class GradientEngine:
             else:
                 top_ch, bot_ch = self._spark_flat(idx)
                 tint_idx       = idx
-            ratio = tint_idx / 16.0
-            bot_clr = self.spark_color(ratio * 0.5)
-            top_clr = self.spark_color(0.5 + ratio * 0.5)
+            ratio     = tint_idx / 16.0
+            ratio_bot = ratio * 0.5
+            ratio_top = 0.5 + ratio * 0.5
+            if live and i == last_i:
+                bot_clr = self.spark_color(ratio_bot, dim=LIVE_DIM)
+                top_clr = self.spark_color(ratio_top, dim=LIVE_DIM)
+            else:
+                bot_clr = self.spark_color(ratio_bot)
+                top_clr = self.spark_color(ratio_top)
             top_parts.append(f'{top_clr}{top_ch}{RESET}')
             bot_parts.append(f'{bot_clr}{bot_ch}{RESET}')
         return ''.join(top_parts), ''.join(bot_parts)
@@ -1591,8 +1603,14 @@ class Renderer:
         trailing = ' ' if leader else '  '
         return f'  {color}│{self.R}{trailing}'
 
-    def sparkline(self, history: list[int]) -> tuple[str, str]:
-        return self.gradient.sparkline(history)
+    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
+        return self.gradient.sparkline(history, live)
+
+    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
+        return self.gradient.spark_rgb(t, dim)
+
+    def spark_color(self, t: float, dim: float = 1.0) -> str:
+        return self.gradient.spark_color(t, dim)
 
     # --- Border delegations (backward compat) ---
     def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
@@ -1970,7 +1988,7 @@ class Renderer:
         else:
             if session_id:
                 spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
-                top_row, bot_row = self.sparkline(spark_history[::-1])
+                top_row, bot_row = self.sparkline(spark_history[::-1], live=True)
             else:
                 top_row, bot_row = ' ' * bar_w, ' ' * bar_w
             leader1 = f'{rate_label_padded}{top_row}'
