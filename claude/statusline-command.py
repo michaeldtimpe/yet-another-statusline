@@ -123,6 +123,8 @@ GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
 GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
 GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
 GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
+GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
+GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
@@ -679,19 +681,23 @@ class GitInfo:
     commit: str = ''
     modified: int = 0
     untracked: int = 0
+    deleted: int = 0
+    renamed: int = 0
 
     @classmethod
     def from_cwd(cls, cwd: str) -> GitInfo:
         repo, gitdir   = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)
-        modified = untracked = 0
+        modified = untracked = deleted = renamed = 0
         if branch:
-            modified, untracked = cls._dirty(repo)
+            modified, untracked, deleted, renamed = cls._dirty(repo)
         return cls(
             branch    = branch,
             commit    = commit,
             modified  = modified,
             untracked = untracked,
+            deleted   = deleted,
+            renamed   = renamed,
         )
 
     @staticmethod
@@ -739,28 +745,40 @@ class GitInfo:
         return branch, commit
 
     @staticmethod
-    def _dirty(repo: str) -> tuple[int, int]:
-        modified = untracked = 0
+    def _dirty(repo: str) -> tuple[int, int, int, int]:
+        modified = untracked = deleted = renamed = 0
         if not repo:
-            return modified, untracked
+            return modified, untracked, deleted, renamed
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'ls-files', '-m'],
+                ['git', '-C', repo, 'status', '--porcelain=v1', '-z',
+                 '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,
             )
-            modified = sum(1 for ln in r.stdout.splitlines() if ln.strip())
         except Exception:
-            pass
-        try:
-            r = subprocess.run(
-                ['git', '-C', repo, 'ls-files', '--others', '--exclude-standard',
-                 '--directory', '--no-empty-directory'],
-                capture_output=True, text=True, timeout=2,
-            )
-            untracked = sum(1 for ln in r.stdout.splitlines() if ln.strip())
-        except Exception:
-            pass
-        return modified, untracked
+            return modified, untracked, deleted, renamed
+        entries = [e for e in r.stdout.split('\0') if e]
+        i = 0
+        while i < len(entries):
+            entry = entries[i]
+            if len(entry) < 2:
+                i += 1
+                continue
+            x, y = entry[0], entry[1]
+            if x == 'R' or y == 'R':
+                renamed += 1
+                i += 2  # rename consumes a second NUL-separated original-name field
+                continue
+            if x == '?' and y == '?':
+                untracked += 1
+            elif x == 'A' or y == 'A':
+                untracked += 1
+            elif x == 'D' or y == 'D':
+                deleted += 1
+            elif x == 'M' or y == 'M':
+                modified += 1
+            i += 1
+        return modified, untracked, deleted, renamed
 
 
 @dataclass
@@ -1665,10 +1683,14 @@ class Renderer:
     ) -> str:
         dirty = ''
         if show_dirty:
-            if git.modified > 0:
-                dirty += f'{self.DIRTY}•{git.modified}{RESET}'
             if git.untracked > 0:
-                dirty += f'{self.DIRTY}*{git.untracked}{RESET}'
+                dirty += f'{self.DIRTY}•{git.untracked}{RESET}'
+            if git.modified > 0:
+                dirty += f'{self.DIRTY}*{git.modified}{RESET}'
+            if git.deleted > 0:
+                dirty += f'{self.DIRTY}{GLYPH_TRASH}{git.deleted}{RESET}'
+            if git.renamed > 0:
+                dirty += f'{self.DIRTY}{GLYPH_RENAMED}{git.renamed}{RESET}'
             if dirty:
                 dirty = ' ' + dirty
         tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
@@ -1725,6 +1747,7 @@ class Renderer:
         truncated_git = GitInfo(
             branch=trunc_branch, commit=git.commit,
             modified=git.modified, untracked=git.untracked,
+            deleted=git.deleted, renamed=git.renamed,
         )
         return self.path_git_compact(trunc_pwd, truncated_git)
 
