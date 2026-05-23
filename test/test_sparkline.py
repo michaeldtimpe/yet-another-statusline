@@ -141,3 +141,5 @@ def test_sparkline_live_true_earlier_cells_unchanged() -> None:
 def test_sparkline_live_true_empty_history() -> None:
     """Empty history with live=True must return ('', '')."""
     assert _r.sparkline([], live=True) == ('', '')
+
+

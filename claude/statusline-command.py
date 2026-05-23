@@ -1688,9 +1688,9 @@ class Renderer:
             if git.modified > 0:
                 dirty += f'{self.DIRTY}*{git.modified}{RESET}'
             if git.deleted > 0:
-                dirty += f'{self.DIRTY}{GLYPH_TRASH}{git.deleted}{RESET}'
+                dirty += f'{self.DIRTY}-{git.deleted}{RESET}'
             if git.renamed > 0:
-                dirty += f'{self.DIRTY}{GLYPH_RENAMED}{git.renamed}{RESET}'
+                dirty += f'{self.DIRTY}{GLYPH_RENAMED} {git.renamed}{RESET}'
             if dirty:
                 dirty = ' ' + dirty
         tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
@@ -2052,10 +2052,16 @@ class Renderer:
             # leader2 = f'{" " * label_w}{bot_row}'
             leader2 = f'{" " * rate_label_w}{bot_row}'
 
+        # 1-indexed column of the WINDOW (60s) tick inside the sparkline. History
+        # spans WINDOW*2 (=120s) across bar_w buckets reversed so index 0 is "now",
+        # which puts the 60s boundary at bar_w // 2. col2 is the vsep_leader │
+        # column; sparkline starts rate_label_w cells past that.
+        mark_col = col2 + rate_label_w + (bar_w // 2) if bar_w > 0 else 0
+
         return [
             f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
             f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
-        ], (col1, col2)
+        ], (col1, col2), mark_col
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -2393,7 +2399,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
     )
-    line_tokens, vsep_cols = r.tokens_cost(
+    line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
         sess_cost, day_cost, tok_rate,
@@ -2455,7 +2461,8 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim'))
 
     rows.append(RowSpec('content', content=line_context))
-    rows.append(RowSpec('separator_dim', downs=vsep_cols))
+    tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
+    rows.append(RowSpec('separator_dim', downs=tokens_downs))
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
 

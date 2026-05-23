@@ -21,13 +21,13 @@ def _call() -> Any:
 
 
 def test_tokens_cost_returns_two_equal_width_lines() -> None:
-    lines, cols = _call()
+    lines, cols, _mark_col = _call()
     assert len(lines) == 2
     assert _visible_width(lines[0]) == _visible_width(lines[1])
 
 
 def test_tokens_cost_cols_within_box() -> None:
-    lines, cols = _call()
+    lines, cols, _mark_col = _call()
     col1, col2 = cols
     assert 1 <= col1
     assert col1 < col2
@@ -35,7 +35,7 @@ def test_tokens_cost_cols_within_box() -> None:
 
 
 def test_tokens_cost_row1_starts_with_rate_icon_in_right_section() -> None:
-    lines, cols = _call()
+    lines, cols, _mark_col = _call()
     _, col2 = cols
     row1_stripped = strip_ansi(lines[0])
     leader_start = col2 - 1
@@ -43,8 +43,17 @@ def test_tokens_cost_row1_starts_with_rate_icon_in_right_section() -> None:
 
 
 def test_tokens_cost_row2_right_section_begins_with_15_spaces() -> None:
-    lines, cols = _call()
+    lines, cols, _mark_col = _call()
     _, col2 = cols
     row2_stripped = strip_ansi(lines[1])
     leader_start = col2 - 1
     assert row2_stripped[leader_start:leader_start + 15] == ' ' * 15
+
+
+def test_tokens_cost_spark_mark_col_lies_inside_sparkline() -> None:
+    # The mark col is the 60s tick that build_wide threads into the separator
+    # above the tokens rows. It must sit strictly between the vsep_leader │
+    # (col2) and the right-hand box border.
+    lines, cols, mark_col = _call()
+    _, col2 = cols
+    assert col2 < mark_col < BOX_WIDTH
