@@ -1666,7 +1666,7 @@ class Renderer:
         dirty = ''
         if show_dirty:
             if git.modified > 0:
-                dirty += f'{self.DIRTY}●{git.modified}{RESET}'
+                dirty += f'{self.DIRTY}•{git.modified}{RESET}'
             if git.untracked > 0:
                 dirty += f'{self.DIRTY}*{git.untracked}{RESET}'
             if dirty:
@@ -2138,37 +2138,46 @@ class Renderer:
         return f' {prefix}{bar}'
 
     SPEC_GRADIENTS = [
-        ((20, 60, 200), (20, 180, 240), (100, 240, 255)),       # Ocean
-        ((200, 80, 10), (245, 30, 100), (255, 160, 80)),        # Sunset
-        ((10, 120, 40), (80, 210, 20), (200, 255, 60)),         # Forest
-        ((80, 20, 200), (160, 60, 255), (220, 160, 255)),       # Lavender
-        ((160, 20, 10), (240, 120, 10), (255, 220, 30)),        # Ember
-        ((20, 80, 160), (60, 180, 240), (210, 240, 255)),       # Arctic
-        ((120, 50, 10), (200, 120, 20), (255, 200, 80)),        # Copper
-        ((160, 10, 50), (240, 60, 130), (255, 180, 210)),       # Rose
-        ((10, 110, 90), (20, 210, 150), (120, 255, 200)),       # Mint
-        ((50, 10, 160), (180, 20, 220), (255, 100, 240)),       # Nebula
-        ((140, 10, 180), (40, 100, 255), (20, 220, 200)),       # Aurora
-        ((200, 160, 10), (240, 80, 20), (180, 20, 80)),         # Volcano
+        ((20, 60, 200),  (30, 200, 180),  (220, 255, 120)),     # Ocean    blue → teal → pale green
+        ((60, 20, 160),  (240, 60, 140),  (255, 200, 60)),      # Sunset   indigo → magenta → gold
+        ((10, 80, 120),  (120, 220, 40),  (240, 240, 60)),      # Forest   navy → lime → yellow
+        ((80, 20, 200),  (240, 100, 220), (255, 200, 160)),     # Lavender purple → hot-pink → peach
+        ((140, 20, 30),  (240, 120, 20),  (255, 230, 80)),      # Ember    dark-red → orange → yellow
+        ((30, 40, 140),  (60, 200, 240),  (220, 240, 255)),     # Arctic   navy → cyan → white
+        ((90, 30, 10),   (220, 120, 30),  (255, 220, 100)),     # Copper   brown → orange → gold
+        ((160, 10, 50),  (240, 100, 160), (255, 220, 220)),     # Rose     wine → pink → cream
+        ((10, 90, 100),  (60, 220, 160),  (220, 255, 180)),     # Mint     dark-teal → mint → pale-yellow
+        ((40, 10, 140),  (220, 40, 200),  (60, 220, 240)),      # Nebula   violet → magenta → cyan
+        ((140, 30, 200), (40, 180, 240),  (60, 230, 120)),      # Aurora   violet → cyan → green
+        ((60, 0, 20),    (220, 60, 20),   (255, 220, 40)),      # Volcano  black-red → orange → yellow
     ]
 
-    def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
-        if filled <= 0:
-            return ''
+    SPEC_MID_MIN_WIDTH = 20
+
+    def _spec_rgb_at(self, t: float, idx: int, three_stops: bool = True) -> tuple[int, int, int]:
         stops = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        if not three_stops:
+            stops = (stops[0], stops[-1])
         n = len(stops)
-        denom = max(1, filled - 1)
+        seg = max(0.0, min(1.0, t)) * (n - 1)
+        s0 = min(int(seg), n - 2)
+        s1 = s0 + 1
+        u = seg - s0
+        c0, c1 = stops[s0], stops[s1]
+        return (
+            int(c0[0] + (c1[0] - c0[0]) * u),
+            int(c0[1] + (c1[1] - c0[1]) * u),
+            int(c0[2] + (c1[2] - c0[2]) * u),
+        )
+
+    def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
+        if filled <= 0 or bar_w <= 0:
+            return ''
+        denom = max(1, bar_w - 1)
+        three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
         parts = []
         for i in range(filled):
-            t = i / denom if denom > 0 else 0.0
-            seg = t * (n - 1)
-            s0 = min(int(seg), n - 2)
-            s1 = s0 + 1
-            u = seg - s0
-            c0, c1 = stops[s0], stops[s1]
-            r = int(c0[0] + (c1[0] - c0[0]) * u)
-            g = int(c0[1] + (c1[1] - c0[1]) * u)
-            b = int(c0[2] + (c1[2] - c0[2]) * u)
+            r, g, b = self._spec_rgb_at(i / denom, idx, three_stops)
             parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
         return ''.join(parts)
 
@@ -2185,8 +2194,10 @@ class Renderer:
 
         bar_filled = self.spec_gradient_bar(filled, bar_w, idx)
         if filled > 0 and empty > 0:
-            c_last = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)][-1]
-            r, g, b = int(c_last[0] * 0.45), int(c_last[1] * 0.45), int(c_last[2] * 0.45)
+            denom = max(1, bar_w - 1)
+            three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
+            cr, cg, cb = self._spec_rgb_at(filled / denom, idx, three_stops)
+            r, g, b = int(cr * 0.45), int(cg * 0.45), int(cb * 0.45)
             bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
             empty -= 1
         bar_empty = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
