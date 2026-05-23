@@ -1,9 +1,6 @@
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 4.2  TranscriptUsage properties: billed_in, cache_read, out
-# ---------------------------------------------------------------------------
 
 class TestTranscriptUsageProps:
     def test_billed_in(self) -> None:

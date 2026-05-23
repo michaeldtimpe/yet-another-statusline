@@ -22,13 +22,13 @@ def _assistant_line(msg_id: str, input_tokens: int = 0, cache_creation: int = 0,
 
 
 def test_missing_path_returns_empty() -> None:
-    """4.2 Missing path returns TranscriptUsage()."""
+    """Missing path returns TranscriptUsage()."""
     result = sl.TranscriptUsage.from_transcript('/nonexistent/path.jsonl')
     assert result == sl.TranscriptUsage()
 
 
 def test_two_distinct_assistant_messages_sum_correctly(tmp_path: Path) -> None:
-    """4.3 Two distinct assistant messages with usage sum correctly."""
+    """Two distinct assistant messages with usage sum correctly."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(
         _assistant_line('a', input_tokens=10, output_tokens=20) + '\n' +
@@ -40,7 +40,7 @@ def test_two_distinct_assistant_messages_sum_correctly(tmp_path: Path) -> None:
 
 
 def test_duplicate_message_id_counted_once(tmp_path: Path) -> None:
-    """4.4 Duplicate message ids are counted only once."""
+    """Duplicate message ids are counted only once."""
     p = tmp_path / 'transcript.jsonl'
     line = _assistant_line('a', input_tokens=10, output_tokens=20)
     p.write_text(line + '\n' + line + '\n')
@@ -51,7 +51,7 @@ def test_duplicate_message_id_counted_once(tmp_path: Path) -> None:
 
 
 def test_malformed_line_skipped(tmp_path: Path) -> None:
-    """4.5 Malformed line interleaved with valid lines does not raise, valid line counted."""
+    """Malformed line interleaved with valid lines does not raise, valid line counted."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(
         'not valid json with "usage" and "assistant" keyword\n' +

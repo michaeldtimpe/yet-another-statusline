@@ -1,5 +1,5 @@
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
@@ -59,9 +59,7 @@ def test_model_section_compact_respects_max_width() -> None:
     assert '…' in strip_ansi(out)
 
 
-# ---------------------------------------------------------------------------
 # Single-row guarantee: fit_path + model section always co-exist on row 1
-# ---------------------------------------------------------------------------
 
 class TestSingleRowGuarantee:
     _vsep_w = 5
@@ -132,9 +130,7 @@ class TestSingleRowGuarantee:
         assert total <= width - 4, f'row overflows: total={total} width={width}'
 
 
-# ---------------------------------------------------------------------------
 # Narrow layout: pill on the right
-# ---------------------------------------------------------------------------
 
 def _narrow_session(model_name: str = 'Sonnet 4.6', effort_level: str = '', thinking: bool = False) -> SessionInfo:
     return SessionInfo(

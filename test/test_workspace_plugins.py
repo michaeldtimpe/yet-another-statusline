@@ -11,7 +11,7 @@ def _write_settings(path: Path, plugins: dict[str, bool]) -> None:
 
 
 def test_plugins_merged_from_home_and_project(tmp_home: Path, tmp_path: Path) -> None:
-    """8.2 Plugins from home and project settings are merged."""
+    """Plugins from home and project settings are merged."""
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': True})
     project_dir = tmp_path / 'myproject'
     _write_settings(project_dir / '.claude' / 'settings.json', {'bar@2.0': True})
@@ -23,7 +23,7 @@ def test_plugins_merged_from_home_and_project(tmp_home: Path, tmp_path: Path) ->
 
 
 def test_false_values_excluded(tmp_home: Path) -> None:
-    """8.3 False values are excluded from plugins."""
+    """False values are excluded from plugins."""
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': False})
 
     ws = sl.Workspace()
@@ -32,7 +32,7 @@ def test_false_values_excluded(tmp_home: Path) -> None:
 
 
 def test_duplicates_collapsed_first_seen_order(tmp_home: Path, tmp_path: Path) -> None:
-    """8.4 Duplicates collapsed; first-seen order preserved."""
+    """Duplicates collapsed; first-seen order preserved."""
     # foo appears in both home (first) and project (second)
     _write_settings(tmp_home / '.claude' / 'settings.json', {'foo@1.0': True})
     project_dir = tmp_path / 'proj'
@@ -44,7 +44,7 @@ def test_duplicates_collapsed_first_seen_order(tmp_home: Path, tmp_path: Path) -
 
 
 def test_malformed_json_silently_skipped(tmp_home: Path, tmp_path: Path) -> None:
-    """8.5 Malformed JSON in one file is silently skipped; other file still read."""
+    """Malformed JSON in one file is silently skipped; other file still read."""
     # Write invalid JSON to home settings
     home_settings = tmp_home / '.claude' / 'settings.json'
     home_settings.parent.mkdir(parents=True, exist_ok=True)

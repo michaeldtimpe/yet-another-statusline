@@ -2,9 +2,6 @@ import pytest
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 3.2  Sonnet: input=1_000_000, output=1_000_000 -> 18.0
-# ---------------------------------------------------------------------------
 
 def test_session_cost_sonnet() -> None:
     usage = sl.TranscriptUsage(
@@ -17,9 +14,6 @@ def test_session_cost_sonnet() -> None:
     assert cost == pytest.approx(18.0, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# 3.3  Opus: cache_creation=1_000_000, cache_read=1_000_000 -> 20.25
-# ---------------------------------------------------------------------------
 
 def test_session_cost_opus_cache() -> None:
     usage = sl.TranscriptUsage(
@@ -32,9 +26,6 @@ def test_session_cost_opus_cache() -> None:
     assert cost == pytest.approx(20.25, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# 3.4  Haiku: input=2_000_000, output=1_000_000 -> 5.60
-# ---------------------------------------------------------------------------
 
 def test_session_cost_haiku() -> None:
     usage = sl.TranscriptUsage(
@@ -47,9 +38,6 @@ def test_session_cost_haiku() -> None:
     assert cost == pytest.approx(5.60, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# 3.5  Default -> session_cost == 0.0
-# ---------------------------------------------------------------------------
 
 def test_session_cost_default_zero() -> None:
     usage = sl.TranscriptUsage()
@@ -58,9 +46,6 @@ def test_session_cost_default_zero() -> None:
     assert cost == pytest.approx(0.0, abs=1e-9)
 
 
-# ---------------------------------------------------------------------------
-# 3.6  day_cost via TokenLog
-# ---------------------------------------------------------------------------
 
 def test_day_cost_via_token_log() -> None:
     # Use sonnet rates: rate_in=3.00, rate_out=15.00

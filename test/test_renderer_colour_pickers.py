@@ -5,9 +5,6 @@ import statusline_command as sl
 _r = sl.Renderer()
 
 
-# ---------------------------------------------------------------------------
-# 5.1  fill_colour — at 0, 69.999, 70, 89.999, 90, 100
-# ---------------------------------------------------------------------------
 
 class TestFillColour:
     def test_0_is_ok(self) -> None:
@@ -29,9 +26,6 @@ class TestFillColour:
         assert _r.fill_colour(100) == sl.CLR_ALERT
 
 
-# ---------------------------------------------------------------------------
-# 5.2  day_cost_colour — at 0, 24.999, 25.0, 50.0, 50.01
-# ---------------------------------------------------------------------------
 
 class TestDayCostColour:
     def test_0_is_ok(self) -> None:
@@ -50,9 +44,6 @@ class TestDayCostColour:
         assert _r.day_cost_colour(50.01) == sl.CLR_ALERT
 
 
-# ---------------------------------------------------------------------------
-# 5.3  model_colour — opus, sonnet, haiku, unknown
-# ---------------------------------------------------------------------------
 
 class TestModelColour:
     def test_opus(self) -> None:

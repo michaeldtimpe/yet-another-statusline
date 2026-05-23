@@ -1,14 +1,12 @@
 import importlib.util
-import re
 import sys
 from pathlib import Path
 from typing import Callable
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Import shim: load claude/statusline-command.py under a stable module name
-# ---------------------------------------------------------------------------
+from helper import strip_ansi as _strip_ansi
+
 _SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline-command.py'
 
 if 'statusline_command' not in sys.modules:
@@ -20,24 +18,12 @@ if 'statusline_command' not in sys.modules:
 
 import statusline_command as sl  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# ANSI-stripping helper
-# ---------------------------------------------------------------------------
-_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
-
-
-def strip_ansi(s: str) -> str:
-    return _ANSI_RE.sub('', s)
-
 
 @pytest.fixture(name='strip_ansi')
 def strip_ansi_fixture() -> Callable[[str], str]:
-    return strip_ansi
+    return _strip_ansi
 
 
-# ---------------------------------------------------------------------------
-# tmp_home: redirect sl.HOME to tmp_path so tests never touch the real $HOME
-# ---------------------------------------------------------------------------
 @pytest.fixture
 def tmp_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(sl, 'HOME', tmp_path)

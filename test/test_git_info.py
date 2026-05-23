@@ -8,9 +8,6 @@ import pytest
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 6.2  Helpers to build a synthetic .git directory (no shell-out)
-# ---------------------------------------------------------------------------
 
 def _make_git_dir(base: Path, branch: str = 'main', commit: str = 'abcdef1234567890') -> Path:
     """Create a minimal .git directory structure in base."""
@@ -23,9 +20,6 @@ def _make_git_dir(base: Path, branch: str = 'main', commit: str = 'abcdef1234567
     return gitdir
 
 
-# ---------------------------------------------------------------------------
-# 6.3  _find_repo walks upward to find .git
-# ---------------------------------------------------------------------------
 
 def test_find_repo_walks_upward(tmp_path: Path) -> None:
     """_find_repo walks from a deep subdirectory up to where .git lives."""
@@ -47,9 +41,6 @@ def test_find_repo_no_git_returns_empty(tmp_path: Path) -> None:
     assert gitdir == ''
 
 
-# ---------------------------------------------------------------------------
-# 6.4  _read_head: ref HEAD with branch + commit truncated to 9 chars
-# ---------------------------------------------------------------------------
 
 def test_read_head_ref_branch(tmp_path: Path) -> None:
     """_read_head parses ref: HEAD and returns branch + 9-char commit."""
@@ -59,9 +50,6 @@ def test_read_head_ref_branch(tmp_path: Path) -> None:
     assert commit == 'abcdef123'  # first 9 chars
 
 
-# ---------------------------------------------------------------------------
-# 6.5  _read_head: detached HEAD
-# ---------------------------------------------------------------------------
 
 def test_read_head_detached(tmp_path: Path) -> None:
     """_read_head returns ('d:<sha[:7]>', '') for a detached HEAD."""
@@ -75,9 +63,6 @@ def test_read_head_detached(tmp_path: Path) -> None:
     assert commit == ''
 
 
-# ---------------------------------------------------------------------------
-# 6.6  GitInfo.from_cwd returns empty GitInfo for non-repo path
-# ---------------------------------------------------------------------------
 
 def test_from_cwd_non_repo(tmp_path: Path) -> None:
     """from_cwd returns an empty GitInfo when no .git exists."""
@@ -85,9 +70,6 @@ def test_from_cwd_non_repo(tmp_path: Path) -> None:
     assert result == sl.GitInfo(branch='', commit='', modified=0, untracked=0)
 
 
-# ---------------------------------------------------------------------------
-# 6.7  Integration test: real git repo (skipped if git not installed)
-# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(shutil.which('git') is None, reason='git not installed')
 def test_from_cwd_real_repo(tmp_path: Path) -> None:

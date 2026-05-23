@@ -1,9 +1,6 @@
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 4.1  Model.cost_rates — opus, haiku, sonnet, unknown
-# ---------------------------------------------------------------------------
 
 class TestModelCostRates:
     def test_opus_rates(self) -> None:

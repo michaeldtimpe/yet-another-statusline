@@ -4,9 +4,6 @@ from pathlib import Path
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 7.2  _find_root walks upward to find an openspec/ directory
-# ---------------------------------------------------------------------------
 
 def test_find_root_walks_upward(tmp_path: Path) -> None:
     """_find_root walks up from a subdirectory to find openspec/."""
@@ -25,9 +22,6 @@ def test_find_root_no_openspec_returns_empty(tmp_path: Path) -> None:
     assert result == ''
 
 
-# ---------------------------------------------------------------------------
-# 7.3  Counts - [ ] vs - [x] lines in tasks.md
-# ---------------------------------------------------------------------------
 
 def test_counts_open_and_done_tasks(tmp_path: Path) -> None:
     """from_cwd counts - [ ] and - [x] lines per tasks.md."""
@@ -47,9 +41,6 @@ def test_counts_open_and_done_tasks(tmp_path: Path) -> None:
     assert total == 3
 
 
-# ---------------------------------------------------------------------------
-# 7.4  Archived changes are excluded
-# ---------------------------------------------------------------------------
 
 def test_archived_changes_excluded(tmp_path: Path) -> None:
     """Changes under /archive/ are excluded from results."""
@@ -61,9 +52,6 @@ def test_archived_changes_excluded(tmp_path: Path) -> None:
     assert result.changes == []
 
 
-# ---------------------------------------------------------------------------
-# 7.5  tasks.md with zero checkboxes is excluded
-# ---------------------------------------------------------------------------
 
 def test_empty_tasks_excluded(tmp_path: Path) -> None:
     """A tasks.md with no checkbox lines is excluded from results."""

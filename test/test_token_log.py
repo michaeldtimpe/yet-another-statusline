@@ -13,7 +13,7 @@ def _log_path(tmp_home: Path) -> Path:
 
 
 def test_empty_log_first_write(tmp_home: Path) -> None:
-    """2.3 Empty log + first write produces one row and the expected TokenLog."""
+    """Empty log + first write produces one row and the expected TokenLog."""
     result = sl.TokenLog.update('sess-1', TODAY, 100, 50, 200)
     assert result == sl.TokenLog(day_in=100, day_cache_read=50, day_out=200)
     lines = _log_path(tmp_home).read_text().splitlines()
@@ -21,7 +21,7 @@ def test_empty_log_first_write(tmp_home: Path) -> None:
 
 
 def test_replace_same_session(tmp_home: Path) -> None:
-    """2.4 Replacing the same session_id rewrites that row only."""
+    """Replacing the same session_id rewrites that row only."""
     log = _log_path(tmp_home)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f'{TODAY} sess-1 100 50 200\n')
@@ -34,7 +34,7 @@ def test_replace_same_session(tmp_home: Path) -> None:
 
 
 def test_rollup_multiple_sessions(tmp_home: Path) -> None:
-    """2.5 Rollup across multiple sessions on the same day."""
+    """Rollup across multiple sessions on the same day."""
     log = _log_path(tmp_home)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f'{TODAY} sess-1 100 50 200\n')
@@ -46,7 +46,7 @@ def test_rollup_multiple_sessions(tmp_home: Path) -> None:
 
 
 def test_legacy_4_column_rows(tmp_home: Path) -> None:
-    """2.6 Legacy 4-column rows (no cache column) are tolerated."""
+    """Legacy 4-column rows (no cache column) are tolerated."""
     log = _log_path(tmp_home)
     log.parent.mkdir(parents=True, exist_ok=True)
     # 4-column: date session_id in out (no cache)
@@ -59,7 +59,7 @@ def test_legacy_4_column_rows(tmp_home: Path) -> None:
 
 
 def test_other_days_excluded_from_return_preserved_on_disk(tmp_home: Path) -> None:
-    """2.7 Rows from other days are excluded from the return value but preserved on disk."""
+    """Rows from other days are excluded from the return value but preserved on disk."""
     log = _log_path(tmp_home)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f'{YESTERDAY} old 99 9 99\n')

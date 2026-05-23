@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import sl
+import statusline_command as sl
 
 THEMES   = sl.THEMES
 Theme    = sl.Theme
@@ -25,9 +25,7 @@ SESSION  = (Path(__file__).parent.parent / 'claude' / 'statusline'
             / 'session-info-example.json')
 
 
-# ---------------------------------------------------------------------------
 # Schema validation
-# ---------------------------------------------------------------------------
 
 EXPECTED_THEMES = {
     'claude-dark', 'claude-light', 'catppuccin-latte', 'catppuccin-mocha',
@@ -68,9 +66,7 @@ def test_theme_anchor_luminance_triggers_flip(theme_name: str) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # Theme resolution layering
-# ---------------------------------------------------------------------------
 
 def test_resolve_theme_defaults_to_claude_dark(
     monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
@@ -113,14 +109,12 @@ def test_resolve_theme_unknown_name_falls_through(
     assert sl.resolve_theme('no-such-theme') is sl.CLAUDE_DARK
 
 
-# ---------------------------------------------------------------------------
 # Byte-identity snapshot — claude-dark × 3 layouts
 #
 # The rendered statusline encodes (a) the rate-limit countdown derived from
 # `datetime.now()` vs the fixture's `resets_at`, and (b) the rainbow phase
 # derived from `time.time()`. Both must be frozen so the snapshot is
 # deterministic across runs.
-# ---------------------------------------------------------------------------
 
 FROZEN_EPOCH = 1776800000  # arbitrary fixed point before the fixture's resets_at
 FROZEN_DT    = None        # initialised lazily inside _freeze

@@ -1,13 +1,10 @@
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 
 _r = sl.Renderer()
 
 
-# ---------------------------------------------------------------------------
-# 7.2  gradient_bar
-# ---------------------------------------------------------------------------
 
 def test_gradient_bar_zero_fill_is_empty() -> None:
     assert _r.gradient_bar(0, 30) == ''
@@ -42,9 +39,6 @@ def test_empty_section_fades_leading_chars() -> None:
     assert short == sl.BarChars.EMPTY * 2
 
 
-# ---------------------------------------------------------------------------
-# 7.3  spec_gradient_bar: idx wraps modulo palette length
-# ---------------------------------------------------------------------------
 
 def test_spec_gradient_bar_idx_wraps() -> None:
     palette_len = len(sl.Renderer.SPEC_GRADIENTS)
