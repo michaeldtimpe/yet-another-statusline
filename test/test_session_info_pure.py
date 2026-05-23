@@ -5,9 +5,6 @@ import pytest
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 3.1  SessionInfo.short_pwd
-# ---------------------------------------------------------------------------
 
 class TestShortPwd:
     def test_home_prefix_collapsed(self, tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -31,9 +28,6 @@ class TestShortPwd:
         assert info.short_pwd == '/'
 
 
-# ---------------------------------------------------------------------------
-# 3.2  SessionInfo.model_name
-# ---------------------------------------------------------------------------
 
 class TestModelName:
     def test_display_name_preferred(self) -> None:
@@ -49,9 +43,6 @@ class TestModelName:
         assert info.model_name == 'unknown'
 
 
-# ---------------------------------------------------------------------------
-# 3.3  SessionInfo.model_thinking
-# ---------------------------------------------------------------------------
 
 class TestModelThinking:
     def test_returns_effort_when_thinking_enabled_and_level_set(self) -> None:

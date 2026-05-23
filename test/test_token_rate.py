@@ -37,14 +37,14 @@ def setup_rate(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> Path:
 
 
 def test_single_sample_returns_zero(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """3.4 Empty log + first update returns 0."""
+    """Empty log + first update returns 0."""
     setup_rate(monkeypatch, tmp_home)
     result = sl.TokenRate.update('sess-1', 100, 200)
     assert result == 0
 
 
 def test_two_samples_in_window_return_delta(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """3.5 One synthetic row 30 s ago + new update returns the token delta."""
+    """One synthetic row 30 s ago + new update returns the token delta."""
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 30, 'sess-1', 100, 200)
 
@@ -54,7 +54,7 @@ def test_two_samples_in_window_return_delta(monkeypatch: pytest.MonkeyPatch, tmp
 
 
 def test_stale_rows_pruned_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """3.6 Rows older than KEEP are removed from disk."""
+    """Rows older than KEEP are removed from disk."""
     log = setup_rate(monkeypatch, tmp_home)
     _write_row(log, NOW - 9999, 'sess-1', 1, 1)
 
@@ -65,14 +65,14 @@ def test_stale_rows_pruned_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_home: 
 
 
 def test_history_no_samples_returns_zeros(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """3.7 history with no samples for the session returns [0]*n_buckets."""
+    """history with no samples for the session returns [0]*n_buckets."""
     setup_rate(monkeypatch, tmp_home)
     result = sl.TokenRate.history('sess-1', 5, 60.0)
     assert result == [0, 0, 0, 0, 0]
 
 
 def test_history_two_samples_same_bucket(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """3.8 history with two samples in the same bucket returns one non-zero bucket of the right delta."""
+    """history with two samples in the same bucket returns one non-zero bucket of the right delta."""
     log = setup_rate(monkeypatch, tmp_home)
     # Place two samples very close together in the last second of the window.
     # With window=60 and n_buckets=5, bucket_size=12s. Both samples near now
@@ -87,12 +87,10 @@ def test_history_two_samples_same_bucket(monkeypatch: pytest.MonkeyPatch, tmp_ho
     assert non_zero[0] == 30
 
 
-# ---------------------------------------------------------------------------
 # 2.3 – Bucket boundary snapping
-# ---------------------------------------------------------------------------
 
 def test_history_snaps_bucket_boundaries(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """2.3a Same samples, two now values within same bucket → identical non-zero indices."""
+    """Same samples, two now values within same bucket → identical non-zero indices."""
     log = setup_rate(monkeypatch, tmp_home)
     # window=60, n_buckets=5 → bucket_size=12s
     # Place a pair of samples so their midpoint is ~30 s before NOW.
@@ -117,7 +115,7 @@ def test_history_snaps_bucket_boundaries(monkeypatch: pytest.MonkeyPatch, tmp_ho
 
 
 def test_history_out_of_window_sample_excluded(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """2.3b Out-of-range sample is excluded; sample exactly on oldest edge IS included."""
+    """Out-of-range sample is excluded; sample exactly on oldest edge IS included."""
     log = setup_rate(monkeypatch, tmp_home)
     # window=60, n_buckets=5 → bucket_size=12s
     # first_bucket = int(NOW//12) - 4
@@ -146,12 +144,10 @@ def test_history_out_of_window_sample_excluded(monkeypatch: pytest.MonkeyPatch, 
     assert sum(result) == 80, f'expected total 80, got {sum(result)} — {result}'
 
 
-# ---------------------------------------------------------------------------
 # 2.4 – Same stream, two now values within a bucket → identical non-zero indices
-# ---------------------------------------------------------------------------
 
 def test_history_same_nonzero_indices_within_bucket(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """2.4 now=T and now=T+0.4*bucket_size yield identical non-zero indices."""
+    """now=T and now=T+0.4*bucket_size yield identical non-zero indices."""
     log = setup_rate(monkeypatch, tmp_home)
     bucket_size = 60.0 / 5  # 12 s
 
@@ -175,12 +171,10 @@ def test_history_same_nonzero_indices_within_bucket(monkeypatch: pytest.MonkeyPa
     assert nz_a == nz_b, f'non-zero indices changed: {nz_a} vs {nz_b}'
 
 
-# ---------------------------------------------------------------------------
 # 2.5 – Advancing now by exactly one bucket shifts non-zero indices by -1
-# ---------------------------------------------------------------------------
 
 def test_history_advancing_one_bucket_shifts_indices(monkeypatch: pytest.MonkeyPatch, tmp_home: Path) -> None:
-    """2.5 now advances by bucket_size → every surviving non-zero index shifts by -1."""
+    """now advances by bucket_size → every surviving non-zero index shifts by -1."""
     log = setup_rate(monkeypatch, tmp_home)
     bucket_size = 60.0 / 5  # 12 s
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 
 _r = sl.Renderer()
@@ -30,9 +30,7 @@ def _make_tasks(
     return sl.TaskList(tasks=objs, last_event_ts=last_event_ts)
 
 
-# ---------------------------------------------------------------------------
 # A. task_row formatting (wide)
-# ---------------------------------------------------------------------------
 
 def test_task_row_includes_glyph() -> None:
     out = _r.task_row(_make_tasks(), 100)
@@ -82,9 +80,7 @@ def test_task_row_long_active_form_elides() -> None:
     assert '…' in strip_ansi(out)
 
 
-# ---------------------------------------------------------------------------
 # B. task_row compact form (medium)
-# ---------------------------------------------------------------------------
 
 def test_task_row_compact_has_count() -> None:
     out = _r.task_row(_make_tasks([
@@ -99,9 +95,7 @@ def test_task_row_compact_drops_active_form() -> None:
     assert 'Doing distinctive thing' not in strip_ansi(out)
 
 
-# ---------------------------------------------------------------------------
 # C. build_wide / build_medium integration
-# ---------------------------------------------------------------------------
 
 def _render(monkeypatch: pytest.MonkeyPatch, builder, tasks: sl.TaskList, width: int) -> str:
     monkeypatch.setattr(

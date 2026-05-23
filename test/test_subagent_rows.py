@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 
 _r = sl.Renderer()
@@ -32,9 +32,7 @@ def _make_sub(
     )
 
 
-# ---------------------------------------------------------------------------
 # A. subagent_row formatting
-# ---------------------------------------------------------------------------
 
 def test_subagent_row_includes_agent_type() -> None:
     out = _r.subagent_row(_make_sub(), 100)
@@ -121,9 +119,7 @@ def test_subagent_row_dur_no_timestamp_fallback() -> None:
     assert '0s' in strip_ansi(out)
 
 
-# ---------------------------------------------------------------------------
 # B. build_wide integration
-# ---------------------------------------------------------------------------
 
 def _render_wide(monkeypatch: pytest.MonkeyPatch, subs: list[sl.RunningSubagent]) -> str:
     monkeypatch.setattr(

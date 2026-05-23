@@ -1,5 +1,5 @@
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer
@@ -49,9 +49,7 @@ def test_path_git_compact_no_commit_no_dirty() -> None:
     assert '*' not in stripped
 
 
-# ---------------------------------------------------------------------------
 # path_git keyword-flag regression (task 4.3)
-# ---------------------------------------------------------------------------
 
 class TestPathGitFlags:
     def test_defaults_byte_identical(self) -> None:
@@ -91,9 +89,7 @@ class TestPathGitFlags:
         assert '[5m]' in stripped
 
 
-# ---------------------------------------------------------------------------
 # fit_path ladder (task 4.2)
-# ---------------------------------------------------------------------------
 
 class TestFitPath:
     def _git(self, branch: str = 'main', commit: str = 'abc1234',

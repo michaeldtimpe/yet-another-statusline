@@ -1,10 +1,6 @@
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 2.1  fmt_tok
-# ---------------------------------------------------------------------------
-
 class TestFmtTok:
     def test_zero(self) -> None:
         assert sl.fmt_tok(0) == '0'
@@ -12,28 +8,24 @@ class TestFmtTok:
     def test_one(self) -> None:
         assert sl.fmt_tok(1) == '1'
 
-    def test_999(self) -> None:
+    def test_below_thousand_unchanged(self) -> None:
         assert sl.fmt_tok(999) == '999'
 
-    def test_1k(self) -> None:
+    def test_thousand_rounds_to_k(self) -> None:
         assert sl.fmt_tok(1000) == '1.0K'
 
-    def test_12345(self) -> None:
+    def test_five_digit_rounds_to_one_decimal_k(self) -> None:
         assert sl.fmt_tok(12_345) == '12.3K'
 
-    def test_999k(self) -> None:
+    def test_just_below_million_stays_in_k(self) -> None:
         assert sl.fmt_tok(999_999) == '1000.0K'
 
-    def test_1m(self) -> None:
+    def test_million_displays_as_m(self) -> None:
         assert sl.fmt_tok(1_000_000) == '1.0M'
 
-    def test_2_5m(self) -> None:
+    def test_multi_million_displays_as_m(self) -> None:
         assert sl.fmt_tok(2_500_000) == '2.5M'
 
-
-# ---------------------------------------------------------------------------
-# 2.2  _is_wide
-# ---------------------------------------------------------------------------
 
 class TestIsWide:
     def test_ascii_not_wide(self) -> None:
@@ -61,10 +53,6 @@ class TestIsWide:
         assert sl._is_wide('\U0001FB00') is False
 
 
-# ---------------------------------------------------------------------------
-# 2.3  _visible_width
-# ---------------------------------------------------------------------------
-
 class TestVisibleWidth:
     def test_empty_string(self) -> None:
         assert sl._visible_width('') == 0
@@ -83,39 +71,31 @@ class TestVisibleWidth:
         assert sl._visible_width('\x1b[38;5;75m🎨\x1b[0m') == 2
 
 
-# ---------------------------------------------------------------------------
-# 2.4  sparkline_width
-# ---------------------------------------------------------------------------
-
 class TestSparklineWidth:
-    def test_89(self) -> None:
+    def test_below_lower_threshold_returns_zero(self) -> None:
         assert sl.sparkline_width(89) == 0
 
-    def test_90(self) -> None:
+    def test_at_lower_threshold_returns_ten(self) -> None:
         assert sl.sparkline_width(90) == 10
 
-    def test_109(self) -> None:
+    def test_below_second_threshold_returns_ten(self) -> None:
         assert sl.sparkline_width(109) == 10
 
-    def test_110(self) -> None:
+    def test_at_second_threshold_returns_twenty(self) -> None:
         assert sl.sparkline_width(110) == 20
 
-    def test_129(self) -> None:
+    def test_below_third_threshold_returns_twenty(self) -> None:
         assert sl.sparkline_width(129) == 20
 
-    def test_130(self) -> None:
+    def test_at_third_threshold_returns_thirty(self) -> None:
         assert sl.sparkline_width(130) == 30
 
-    def test_200(self) -> None:
+    def test_above_all_thresholds_returns_thirty(self) -> None:
         assert sl.sparkline_width(200) == 30
 
-    def test_0(self) -> None:
+    def test_zero_returns_zero(self) -> None:
         assert sl.sparkline_width(0) == 0
 
-
-# ---------------------------------------------------------------------------
-# 2.6  rainbow_at
-# ---------------------------------------------------------------------------
 
 class TestRainbowAt:
     def test_returns_escape_for_palette_entry(self) -> None:
@@ -139,10 +119,6 @@ class TestRainbowAt:
         assert sl.rainbow_at(step, offset) == expected
 
 
-# ---------------------------------------------------------------------------
-# 2.7  _middle_ellipsis
-# ---------------------------------------------------------------------------
-
 class TestMiddleEllipsis:
     def test_fits_no_truncation(self) -> None:
         assert sl._middle_ellipsis('hello', 10) == 'hello'
@@ -160,13 +136,13 @@ class TestMiddleEllipsis:
         assert result.startswith('abc')
         assert result.endswith('ij')
 
-    def test_edge_max_w_0(self) -> None:
+    def test_edge_zero_width(self) -> None:
         assert sl._middle_ellipsis('hello', 0) == '…'
 
-    def test_edge_max_w_1(self) -> None:
+    def test_edge_one_width(self) -> None:
         assert sl._middle_ellipsis('hello', 1) == '…'
 
-    def test_edge_max_w_2(self) -> None:
+    def test_edge_two_width(self) -> None:
         result = sl._middle_ellipsis('hello', 2)
         assert sl._visible_width(result) <= 2
         assert '…' in result

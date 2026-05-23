@@ -1,15 +1,13 @@
 import re
 
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 
 _r = sl.Renderer()
 
 
-# ---------------------------------------------------------------------------
 # Empty / all-zero baselines
-# ---------------------------------------------------------------------------
 
 def test_sparkline_empty() -> None:
     assert _r.sparkline([]) == ('', '')
@@ -30,9 +28,7 @@ def test_sparkline_monotone_flat_at_max() -> None:
     assert strip_ansi(bot) == f'{sl.SPARK_RISE_TALL}██'
 
 
-# ---------------------------------------------------------------------------
 # Neighbor-aware slope behavior
-# ---------------------------------------------------------------------------
 
 def test_sparkline_isolated_peak_medium() -> None:
     # Construct so the middle peak lands in the medium band (idx 4–7).
@@ -95,9 +91,7 @@ def test_sparkline_width_matches_input() -> None:
     assert len(strip_ansi(bot)) == len(history)
 
 
-# ---------------------------------------------------------------------------
 # live flag tests
-# ---------------------------------------------------------------------------
 
 _RGB_RE = re.compile(r'\033\[38;2;(\d+);(\d+);(\d+)m')
 
