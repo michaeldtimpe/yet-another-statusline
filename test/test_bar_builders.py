@@ -20,6 +20,22 @@ def test_gradient_bar_visible_width() -> None:
     assert sl._visible_width(stripped) == 6
 
 
+def test_gradient_bar_mid_bg_lands_before_mid_glyph() -> None:
+    # mid_bg ANSI (e.g. converted from BAR_EMPTY fg) must precede the MID
+    # leading-edge glyph so the semi-circle sits on the empty-bar grey.
+    mid_bg = sl._fg_to_bg(_r.BAR_EMPTY)
+    result = _r.gradient_bar(5, 30, mid_bg)
+    mid_idx = result.rfind(sl.BarChars.MID)
+    assert mid_idx > 0
+    assert mid_bg in result[:mid_idx]
+
+
+def test_fg_to_bg_converts_256_and_truecolor() -> None:
+    assert sl._fg_to_bg('\x1b[38;5;238m')         == '\x1b[48;5;238m'
+    assert sl._fg_to_bg('\x1b[38;2;188;192;204m') == '\x1b[48;2;188;192;204m'
+    assert sl._fg_to_bg('\x1b[1m')                == '\x1b[1m'
+
+
 # ---------------------------------------------------------------------------
 # 7.3  spec_gradient_bar: idx wraps modulo palette length
 # ---------------------------------------------------------------------------
