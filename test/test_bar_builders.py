@@ -20,20 +20,26 @@ def test_gradient_bar_visible_width() -> None:
     assert sl._visible_width(stripped) == 6
 
 
-def test_gradient_bar_mid_bg_lands_before_mid_glyph() -> None:
-    # mid_bg ANSI (e.g. converted from BAR_EMPTY fg) must precede the MID
-    # leading-edge glyph so the semi-circle sits on the empty-bar grey.
-    mid_bg = sl._fg_to_bg(_r.BAR_EMPTY)
-    result = _r.gradient_bar(5, 30, mid_bg)
-    mid_idx = result.rfind(sl.BarChars.MID)
-    assert mid_idx > 0
-    assert mid_bg in result[:mid_idx]
+def test_gradient_bar_mid_glyph_has_no_background() -> None:
+    # The MID leading-edge glyph used to sit on a coloured BG to fake a pill cap.
+    # The fill→empty seam is now blended by fading the leading empty chars, so
+    # gradient_bar must not emit any BG SGR.
+    result = _r.gradient_bar(5, 30)
+    assert '\x1b[48;' not in result
 
 
-def test_fg_to_bg_converts_256_and_truecolor() -> None:
-    assert sl._fg_to_bg('\x1b[38;5;238m')         == '\x1b[48;5;238m'
-    assert sl._fg_to_bg('\x1b[38;2;188;192;204m') == '\x1b[48;2;188;192;204m'
-    assert sl._fg_to_bg('\x1b[1m')                == '\x1b[1m'
+def test_empty_section_fades_leading_chars() -> None:
+    # First 3 empty chars ramp from a darker shade up to BAR_EMPTY; remainder
+    # share BAR_EMPTY. Smaller `empty` only emits the ramp prefix.
+    full = _r._empty_section(10)
+    fade = _r._empty_fade_colors()
+    for step in fade:
+        assert step in full
+    assert _r.BAR_EMPTY in full
+    assert strip_ansi(full) == sl.BarChars.EMPTY * 10
+    assert _r._empty_section(0) == ''
+    short = strip_ansi(_r._empty_section(2))
+    assert short == sl.BarChars.EMPTY * 2
 
 
 # ---------------------------------------------------------------------------

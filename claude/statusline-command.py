@@ -191,11 +191,6 @@ def _visible_width(s: str) -> int:
     return sum(2 if _is_wide(ch) else 1 for ch in plain)
 
 
-def _fg_to_bg(ansi: str) -> str:
-    # SGR fg → bg: \033[38;… → \033[48;… (256-colour and truecolor both match).
-    return ansi.replace('\x1b[38;', '\x1b[48;')
-
-
 def _middle_ellipsis(text: str, max_w: int) -> str:
     if max_w <= 1:
         return '…'
@@ -1278,7 +1273,7 @@ class GradientEngine:
         b = int(eb + (gb - eb) * u)
         return f'\033[38;2;{r};{g};{b}m'
 
-    def gradient_bar(self, filled: int, bar_w: int, mid_bg: str = '') -> str:
+    def gradient_bar(self, filled: int, bar_w: int) -> str:
         if filled <= 0 or bar_w <= 0:
             return ''
         denom = max(1, bar_w - 1)
@@ -1286,7 +1281,7 @@ class GradientEngine:
         for i in range(filled):
             parts.append(f'{self.gradient_color(i / denom)}{BarChars.FILLED}')
         if filled <= bar_w:
-            parts.append(f'{mid_bg}{self.gradient_color(filled / denom)}{BarChars.MID}')
+            parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
     def _spark_flat(self, idx: int) -> tuple[str, str]:
@@ -1588,8 +1583,8 @@ class Renderer:
     def grad_at(self, col: int, width: int, dim: float = 1.0, fill: float = 1.0) -> str:
         return self.gradient.grad_at(col, width, dim, fill)
 
-    def gradient_bar(self, filled: int, bar_w: int, mid_bg: str = '') -> str:
-        return self.gradient.gradient_bar(filled, bar_w, mid_bg)
+    def gradient_bar(self, filled: int, bar_w: int) -> str:
+        return self.gradient.gradient_bar(filled, bar_w)
 
     def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False) -> str:
         color    = self.gradient.grad_at(col - 1, width, fill=fill)
@@ -2009,6 +2004,34 @@ class Renderer:
         else:
             return self.safe
 
+    _EMPTY_FADE_256 = re.compile(r'\x1b\[38;5;(\d+)m')
+    _EMPTY_FADE_RGB = re.compile(r'\x1b\[38;2;(\d+);(\d+);(\d+)m')
+
+    def _empty_fade_colors(self) -> list[str]:
+        # 3-step ramp going from a darker shade up to BAR_EMPTY, so the fill→empty
+        # seam blends instead of butting a coloured glyph against flat grey.
+        m = self._EMPTY_FADE_256.search(self.BAR_EMPTY)
+        if m:
+            n = int(m.group(1))
+            return [f'\033[38;5;{max(232, n - k)}m' for k in (6, 4, 2)]
+        m = self._EMPTY_FADE_RGB.search(self.BAR_EMPTY)
+        if m:
+            r, g, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return [f'\033[38;2;{int(r*k)};{int(g*k)};{int(b*k)}m' for k in (0.3, 0.5, 0.7)]
+        return [self.BAR_EMPTY] * 3
+
+    def _empty_section(self, empty: int, blend: bool = True) -> str:
+        if empty <= 0:
+            return ''
+        if not blend:
+            return f'{self.BAR_EMPTY}{BarChars.EMPTY * empty}'
+        fade  = self._empty_fade_colors()
+        n     = min(len(fade), empty)
+        parts = [f'{fade[i]}{BarChars.EMPTY}' for i in range(n)]
+        if empty > n:
+            parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
+        return ''.join(parts)
+
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
         fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
@@ -2024,7 +2047,7 @@ class Renderer:
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w, _fg_to_bg(self.alert))}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
+            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
             return f'{a}{self.R} {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -2036,7 +2059,7 @@ class Renderer:
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar    = f'{self.gradient_bar(filled, bar_w, _fg_to_bg(self.BAR_EMPTY))}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
 
@@ -2051,7 +2074,7 @@ class Renderer:
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w, _fg_to_bg(self.alert))}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
+            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
             return f' {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -2059,7 +2082,7 @@ class Renderer:
         bar_w   = max(4, available - _visible_width(prefix) - 3)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar     = f'{self.gradient_bar(filled, bar_w, _fg_to_bg(self.BAR_EMPTY))}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f' {prefix}{bar}'
 
     SPEC_GRADIENTS = [
