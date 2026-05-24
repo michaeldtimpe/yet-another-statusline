@@ -959,7 +959,7 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
 
         <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
           · ctx % used/size · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan
-          · up <elapsed> (<start>) · <model> <effort>
+          · up <elapsed> (<opened> → <last-refresh>) · <model> <effort>
 
     The `git` label is coloured by state: green clean+synced, yellow pending
     (uncommitted changes or commits to push), red drift/error (behind, diverged,
@@ -1033,11 +1033,15 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
             five_seg += f' {r.COMMIT}{reset}{r.R}'
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
         segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
-    start = _session_start(session.transcript_path)
+    now_str = datetime.now().strftime('%H:%M')
+    start   = _session_start(session.transcript_path)
     if start:
         started = datetime.fromtimestamp(start).strftime('%H:%M')
         elapsed = fmt_dur(max(0.0, time.time() - start))
-        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} {r.LABEL}({started}){r.R}', 9))
+        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} '
+                     f'{r.LABEL}({started} → {now_str}){r.R}', 9))   # opened → last refresh
+    else:
+        segs.append((f'{r.LABEL}refreshed {r.R}{r.white_brt}{now_str}{r.R}', 9))
     segs.append((model, 3))   # pinned visually last
 
     # ---- responsive fit ----
