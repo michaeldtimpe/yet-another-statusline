@@ -116,6 +116,7 @@ ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
+GLYPH_FAST     = '\uef76'     # nf-cod-zap (shown when fast_mode is on)
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
 GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
@@ -451,6 +452,7 @@ class SessionInfo:
     exceeds_200k_tokens: bool = False
     effort: Effort = field(default_factory=Effort)
     thinking: Thinking = field(default_factory=Thinking)
+    fast_mode: bool = False
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
@@ -468,6 +470,7 @@ class SessionInfo:
             exceeds_200k_tokens = d.get('exceeds_200k_tokens', False),
             effort              = Effort.from_dict(d.get('effort') or {}),
             thinking            = Thinking.from_dict(d.get('thinking') or {}),
+            fast_mode           = bool(d.get('fast_mode', False)),
             rate_limits         = RateLimits.from_dict(d.get('rate_limits') or {}),
         )
 
@@ -495,7 +498,9 @@ class SessionInfo:
     @property
     def model_thinking(self) -> str:
         if self.thinking.enabled and self.effort.level:
-            return self.effort.level
+            return f'{self.effort.level}/fast' if self.fast_mode else self.effort.level
+        if self.fast_mode:
+            return 'fast'
         return ''
 
     @property
@@ -1829,12 +1834,13 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
-    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '') -> tuple[str, str, int]:
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
         step      = rainbow_step()
         c_think   = rainbow_at(step, 0)
         c_helper  = rainbow_at(step, 9)
         model_clr = self.model_colour(model_name)
         pct       = self._model_bg_pct(effort_level)
+        glyph     = GLYPH_FAST if fast_mode else GLYPH_THINKING
 
         if pct:
             anchor, shift = self._model_anchor_pair(model_name)
@@ -1845,7 +1851,7 @@ class Renderer:
             for ch in model_name:
                 cells.append((ch, anchor, False, False))
             cells.append((' ',            anchor, False, False))
-            cells.append((GLYPH_THINKING, anchor, True,  False))
+            cells.append((glyph,          anchor, True,  False))
             cells.append((' ',            anchor, True,  False))
             cells.append((' ',            anchor, True,  False))
             for ch in model_thinking:
@@ -1855,7 +1861,7 @@ class Renderer:
             pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
             right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
         elif model_thinking:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{GLYPH_THINKING}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
         else:
             right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
 
@@ -2398,6 +2404,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     helper_text, right_text, right_w = r.model_right_section(
         session.model_name, session.model_thinking, session.rate_limits,
         session.effort.level if session.thinking.enabled else '',
+        fast_mode=session.fast_mode,
     )
     line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,

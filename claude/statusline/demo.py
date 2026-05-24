@@ -1,4 +1,4 @@
-"""Hermetic demo for statusline-command.py.
+"""Hermetic demo for statusline_command.py.
 
 Materialises a synthetic ~/.claude/ and project tree under a tempfile, mutates
 the canonical session-info fixture in memory, and pipes the result to the
@@ -20,7 +20,7 @@ from pathlib import Path
 
 WRAPPER_DIR = Path(__file__).resolve().parent
 FIXTURE_PATH = WRAPPER_DIR / 'session-info-example.json'
-STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline-command.py'
+STATUSLINE_SCRIPT = WRAPPER_DIR.parent / 'statusline_command.py'
 
 
 SKILLS_PROGRESSION = (

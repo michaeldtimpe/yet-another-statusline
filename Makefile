@@ -1,4 +1,4 @@
-STATUSLINE_SRC := $(CURDIR)/claude/statusline-command.py
+STATUSLINE_SRC := $(CURDIR)/claude/statusline_command.py
 STATUSLINE_SH  := $(CURDIR)/claude/statusline-command.sh
 THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
 INSTALL_DIRS   := $(HOME)/.claude $(HOME)/.claude.personal

@@ -7,7 +7,7 @@ import pytest
 
 from helper import strip_ansi as _strip_ansi
 
-_SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline-command.py'
+_SRC = Path(__file__).resolve().parent.parent / 'claude' / 'statusline_command.py'
 
 if 'statusline_command' not in sys.modules:
     _spec = importlib.util.spec_from_file_location('statusline_command', _SRC)

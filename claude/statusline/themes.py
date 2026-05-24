@@ -2,7 +2,7 @@
 
 A `Theme` is a flat dataclass holding every colour the statusline draws.
 Selection is layered (CLI flag → env var → config file → built-in default)
-and resolution happens in `statusline-command.py::main`. See
+and resolution happens in `statusline_command.py::main`. See
 `docs/adr/0002-theme-system.md`.
 """
 
