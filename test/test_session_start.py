@@ -43,6 +43,36 @@ def test_render_shows_uptime_when_started(monkeypatch, tmp_path: Path) -> None:
     assert out.rstrip().endswith('Opus 4.7')  # model pinned last
 
 
+def _ctx_info(tmp_path: Path, **ctx) -> dict:
+    return {
+        'session_id': 'abc', 'transcript_path': '', 'cwd': str(tmp_path),
+        'model': {'id': 'claude-opus-4-7', 'display_name': 'Opus 4.7'},
+        'context_window': ctx,
+    }
+
+
+def test_ctx_segment_uses_payload_used_percentage(monkeypatch, tmp_path: Path) -> None:
+    # When the payload carries used_percentage, the ctx segment shows THAT number
+    # (so it matches Claude Code's own context indicator) — not raw total/size,
+    # which here would round to 0%.
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    info = _ctx_info(tmp_path, total_input_tokens=950_000, total_output_tokens=600,
+                     context_window_size=1_000_000, used_percentage=97)
+    out = ANSI.sub('', sl.render(info, 200))
+    assert 'ctx 97%' in out
+
+
+def test_ctx_segment_falls_back_to_total_over_size(monkeypatch, tmp_path: Path) -> None:
+    # Older payloads omit used_percentage → fall back to total/size.
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    info = _ctx_info(tmp_path, total_input_tokens=500_000, total_output_tokens=0,
+                     context_window_size=1_000_000)   # no used_percentage
+    out = ANSI.sub('', sl.render(info, 200))
+    assert 'ctx 50%' in out
+
+
 def test_osascript_width_uses_fresh_cache(monkeypatch, tmp_path) -> None:
     # A freshly-written cache file is returned without spawning osascript, so the
     # width detector is fast on the common path.
