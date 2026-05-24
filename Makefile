@@ -4,7 +4,7 @@ THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
 MON_SRC        := $(CURDIR)/claude/mon.py
 INSTALL_DIRS   := $(HOME)/.claude $(HOME)/.claude.personal
 
-statusline/install:
+install:
 	@for dir in $(INSTALL_DIRS); do \
 		mkdir -p "$$dir/statusline"; \
 		ln -sf $(STATUSLINE_SRC) "$$dir/statusline-command.py"; \
@@ -14,8 +14,11 @@ statusline/install:
 		echo "installed -> $$dir"; \
 	done
 
-statusline/test:
+demo:
 	@python3 claude/statusline/demo.py
+
+demo/img:
+	@python3 claude/statusline/demo.py --snapshots demo/
 
 mon/install:
 	@for dir in $(INSTALL_DIRS); do \
@@ -30,4 +33,4 @@ mon/install:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: statusline/install statusline/test mon/install mon/run
+.PHONY: install demo demo/img mon/install mon/run

@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -39,14 +41,14 @@ PLUGINS_PROGRESSION = (
     ['openspec@0.1.0', 'frontend-design@0.3.2', 'rocky@0.1.0'],
 )
 
-# (agentType, description) pairs — None means no subagent active
+# (agentType, description, billed_in, output_tokens) — empty list means no subagent active
 SUBAGENTS_PROGRESSION = (
-    None,
-    ('explore', 'Search codebase - looking for token tracking'),
-    ('explore', 'Search codebase - looking for token tracking'),
-    ('general-purpose', 'Fix sparkline - update bucket algorithm'),
-    ('general-purpose', 'Fix sparkline - update bucket algorithm'),
-    None,
+    [],
+    [('explore',         'Search codebase - looking for token tracking', 0, 0)],
+    [('explore',         'Search codebase - looking for token tracking', 0, 0)],
+    [('general-purpose', 'Fix sparkline - update bucket algorithm',      0, 0)],
+    [('general-purpose', 'Fix sparkline - update bucket algorithm',      0, 0)],
+    [],
 )
 
 # (subject, activeForm) for the TaskList progression row.
@@ -132,20 +134,47 @@ def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     )
 
 
-def write_subagents(claude_dir: Path, session_id: str, project_dir: Path, subagent: tuple[str, str] | None) -> None:
+def write_subagents(
+    claude_dir:  Path,
+    session_id:  str,
+    project_dir: Path,
+    subagents:   list[tuple[str, str, int, int]],
+) -> None:
+    """Each subagent entry: (agentType, description, billed_in, output_tokens)."""
     project_slug = str(project_dir).replace('/', '-').lstrip('-')
     subagents_dir = claude_dir / 'projects' / f'-{project_slug}' / session_id / 'subagents'
     subagents_dir.mkdir(parents=True, exist_ok=True)
     for f in subagents_dir.iterdir():
         f.unlink()
-    if subagent is not None:
-        agent_type, description = subagent
-        name = 'demo-subagent-1'
-        meta = subagents_dir / f'{name}.meta.json'
+    now = time.time()
+    ts  = datetime.now().astimezone().isoformat()
+    for i, (agent_type, description, billed_in, output_tokens) in enumerate(subagents, 1):
+        name = f'demo-subagent-{i}'
+        (subagents_dir / f'{name}.meta.json').write_text(
+            json.dumps({'agentType': agent_type, 'description': description})
+        )
         jsonl = subagents_dir / f'{name}.jsonl'
-        meta.write_text(json.dumps({'agentType': agent_type, 'description': description}))
-        jsonl.write_text('')
-        now = time.time()
+        if billed_in or output_tokens:
+            # cache_creation carries the bulk; input_tokens gets the remainder
+            cache_creation = int(billed_in * 0.7)
+            input_tokens   = billed_in - cache_creation
+            entry = {
+                'type':      'assistant',
+                'timestamp': ts,
+                'message': {
+                    'id':   f'msg_demo_agent_{i}',
+                    'role': 'assistant',
+                    'usage': {
+                        'input_tokens':                input_tokens,
+                        'cache_creation_input_tokens': cache_creation,
+                        'cache_read_input_tokens':     0,
+                        'output_tokens':               output_tokens,
+                    },
+                },
+            }
+            jsonl.write_text(json.dumps(entry) + '\n')
+        else:
+            jsonl.write_text('')
         os.utime(jsonl, (now, now))
 
 
@@ -332,22 +361,261 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
     sys.stdout.write('\n\n\n')
 
 
+SNAPSHOT_COLS = 160    # wide layout shows every section
+SNAP_WINDOW   = 60.0   # STATUSLINE_TOKEN_WINDOW for snapshots (production default)
+
+
+@dataclass
+class ScenarioConfig:
+    name:          str
+    model_id:      str                       = 'claude-sonnet-4-6'
+    model_name:    str                       = 'Sonnet 4.6'
+    effort:        str                       = ''
+    thinking:      bool                      = False
+    context_pct:   float                     = 0.20
+    skills:        list[str]                 = field(default_factory=list)
+    plugins:       list[str]                 = field(default_factory=list)
+    subagents:     list[tuple[str, str, int, int]] = field(default_factory=list)
+    openspec:      list[tuple[str, int, int]]= field(default_factory=list)
+    tasks:         list[tuple[str, str, str]]= field(default_factory=list)
+    five_hour_pct: float                     = 30.0
+    seven_day_pct: float                     = 20.0
+
+
+SCENARIOS: list[ScenarioConfig] = [
+    ScenarioConfig(
+        name        = 'sonnet-thinking',
+        model_id    = 'claude-sonnet-4-6',
+        model_name  = 'Sonnet 4.6',
+        effort      = 'medium',
+        thinking    = True,
+        context_pct = 0.20,
+        skills      = ['grill-me', 'caveman'],
+        plugins     = ['openspec@0.1.0'],
+        five_hour_pct = 30.0,
+        seven_day_pct = 20.0,
+    ),
+    ScenarioConfig(
+        name        = 'opus-thinking',
+        model_id    = 'claude-opus-4-7',
+        model_name  = 'Opus 4.7',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.45,
+        skills      = ['grill-me', 'caveman', 'tdd'],
+        plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
+        five_hour_pct = 52.0,
+        seven_day_pct = 41.0,
+    ),
+    ScenarioConfig(
+        name        = 'tasks',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.15,
+        skills      = ['grill-me', 'caveman'],
+        plugins     = ['openspec@0.1.0'],
+        tasks       = [
+            ('Audit gradient palette', 'Auditing gradient palette', 'completed'),
+            ('Wire alert-mode pill',   'Wiring alert-mode pill',    'completed'),
+            ('Refactor border math',   'Refactoring border math',   'in_progress'),
+            ('Update CONTEXT.md',      'Updating CONTEXT.md',       'pending'),
+        ],
+        five_hour_pct = 22.0,
+        seven_day_pct = 15.0,
+    ),
+    ScenarioConfig(
+        name        = 'openspec',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.48,
+        skills      = ['grill-me', 'caveman', 'tdd'],
+        plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
+        openspec    = [
+            ('add-gradient-engine',        6, 8),
+            ('port-statusline-to-python',  3, 8),
+            ('wire-alert-mode-pill',       1, 6),
+        ],
+        five_hour_pct = 46.0,
+        seven_day_pct = 37.0,
+    ),
+    ScenarioConfig(
+        name        = 'subagents',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.48,
+        skills      = ['grill-me', 'caveman', 'tdd'],
+        plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
+        subagents   = [
+            ('explore',         'Search codebase - looking for token tracking', 3_200,   420),
+            ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850),
+            ('claude',          'Review border math implementation',            5_400,   980),
+        ],
+        five_hour_pct = 46.0,
+        seven_day_pct = 37.0,
+    ),
+    ScenarioConfig(
+        name        = 'kitchen-sink',
+        model_id    = 'claude-opus-4-7',
+        model_name  = 'Opus 4.7',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.75,
+        skills      = ['grill-me', 'caveman', 'tdd', 'rocky:rocky'],
+        plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2', 'rocky@0.1.0'],
+        subagents   = [
+            ('explore',         'Search codebase - looking for token tracking', 3_200,   420),
+            ('general-purpose', 'Fix sparkline - update bucket algorithm',      8_700, 1_850),
+            ('claude',          'Review border math implementation',            5_400,   980),
+        ],
+        openspec    = [
+            ('add-gradient-engine',        6, 8),
+            ('port-statusline-to-python',  3, 8),
+            ('wire-alert-mode-pill',       1, 6),
+        ],
+        tasks       = [
+            ('Audit gradient palette', 'Auditing gradient palette', 'completed'),
+            ('Wire alert-mode pill',   'Wiring alert-mode pill',    'completed'),
+            ('Refactor border math',   'Refactoring border math',   'in_progress'),
+            ('Update CONTEXT.md',      'Updating CONTEXT.md',       'pending'),
+        ],
+        five_hour_pct = 58.0,
+        seven_day_pct = 49.0,
+    ),
+    ScenarioConfig(
+        name        = 'full-context',
+        effort      = 'high',
+        thinking    = True,
+        context_pct = 0.97,
+        skills      = ['grill-me', 'caveman', 'tdd', 'rocky:rocky'],
+        plugins     = ['openspec@0.1.0', 'frontend-design@0.3.2'],
+        five_hour_pct = 71.0,
+        seven_day_pct = 62.0,
+    ),
+]
+
+
+def write_openspec_changes(project_dir: Path, changes: list[tuple[str, int, int]]) -> None:
+    """Replace openspec/changes/ with the given specs. changes = [(name, done, total)]."""
+    changes_dir = project_dir / 'openspec' / 'changes'
+    if changes_dir.exists():
+        shutil.rmtree(changes_dir)
+    changes_dir.mkdir(parents=True, exist_ok=True)
+    for name, done, total in changes:
+        spec_dir = changes_dir / name
+        spec_dir.mkdir(parents=True)
+        tasks_md = (
+            ''.join(f'- [x] task {n}\n' for n in range(1, done + 1))
+            + ''.join(f'- [ ] task {n}\n' for n in range(done + 1, total + 1))
+        )
+        (spec_dir / 'tasks.md').write_text(tasks_md)
+
+
+def write_rate_log_with_peaks(
+    rate_log: Path,
+    session_id: str,
+    combined_total: int,
+    peak_steps: tuple[int, int] = (7, 19),
+    n_steps: int = 25,
+    span_secs: float = 120.0,
+) -> None:
+    """Write a synthetic rate log with two peaks so the sparkline has visible shape.
+
+    All deltas are scaled so the cumulative total matches combined_total — this
+    prevents the real final entry from dwarfing the peaks and flattening the graph.
+    """
+    now = time.time()
+    p1, p2 = peak_steps
+    raw_deltas = [
+        80_000 if s == p1 else
+        60_000 if s == p2 else
+        800
+        for s in range(n_steps)
+    ]
+    scale  = combined_total / sum(raw_deltas)
+    cumul  = 0
+    step_s = span_secs / (n_steps - 1)
+    lines  = []
+    for step, raw in enumerate(raw_deltas):
+        cumul += int(raw * scale)
+        ts = now - span_secs + step * step_s
+        lines.append(f'{ts:.3f} {session_id} {cumul} 0')
+    rate_log.write_text('\n'.join(lines) + '\n')
+
+
+def render_scenario(
+    env:        dict,
+    fixture:    dict,
+    tmpdir:     Path,
+    session_id: str,
+    cfg:        ScenarioConfig,
+    out_dir:    Path,
+) -> None:
+    claude       = tmpdir / '.claude'
+    project      = tmpdir / 'my-project'
+    transcript_p = claude / 'projects' / session_id / f'{session_id}.jsonl'
+    rate_log     = claude / 'statusline-token-rate.log'
+
+    ctx_size  = 200_000
+    total_in  = int(ctx_size * cfg.context_pct * 0.88)
+    total_cc  = int(total_in * 0.18)
+    total_cr  = int(total_in * 12.0)
+    total_out = int(ctx_size * cfg.context_pct * 0.12)
+
+    write_transcript(transcript_p, cfg.skills, total_in, total_cc, total_cr, total_out, tasks=cfg.tasks or None)
+    write_settings(claude, cfg.plugins)
+    write_subagents(claude, session_id, project, cfg.subagents)
+    write_openspec_changes(project, cfg.openspec)
+    write_rate_log_with_peaks(rate_log, session_id, total_in + total_cc + total_out)
+
+    raw = dict(fixture)
+    raw['model']          = {'id': cfg.model_id, 'display_name': cfg.model_name}
+    raw['effort']         = {'level': cfg.effort} if cfg.effort else {}
+    raw['thinking']       = {'enabled': cfg.thinking}
+    raw['cwd']            = str(project)
+    raw.setdefault('workspace', {})['project_dir'] = str(project)
+    raw['transcript_path'] = str(transcript_p)
+    raw['context_window']['total_input_tokens']  = total_in
+    raw['context_window']['total_output_tokens'] = total_out
+    resets = int(time.time()) + 7200
+    raw.setdefault('rate_limits', {}).setdefault('five_hour', {})['resets_at']        = resets
+    raw['rate_limits'].setdefault('seven_day', {})['resets_at']                        = resets
+    raw['rate_limits']['five_hour']['used_percentage'] = cfg.five_hour_pct
+    raw['rate_limits']['seven_day']['used_percentage'] = cfg.seven_day_pct
+
+    snap_env = {**env, 'COLUMNS': str(SNAPSHOT_COLS), 'STATUSLINE_TOKEN_WINDOW': str(SNAP_WINDOW)}
+    out = render_once(snap_env, json.dumps(raw))
+    dest = out_dir / f'{cfg.name}.txt'
+    dest.write_text(out)
+    print(f'  wrote {dest}')
+
+
 def main() -> int:
-    os.system('clear -x')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--snapshots', metavar='DIR', help='render scenario images into DIR instead of animating')
+    args = parser.parse_args()
+
     fixture = json.loads(FIXTURE_PATH.read_text())
     session_id = fixture['session_id']
 
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmpdir = Path(raw_tmp)
         build_synthetic_env(tmpdir, session_id)
-        payload = mutate_session_info(tmpdir, session_id, fixture)
-        raw = json.loads(payload)
 
         env = os.environ.copy()
         env['HOME'] = str(tmpdir)
-        env['STATUSLINE_TOKEN_WINDOW'] = str(DEMO_TOKEN_WINDOW)
 
-        animate(env, raw, tmpdir, session_id)
+        if args.snapshots:
+            out_dir = Path(args.snapshots)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for cfg in SCENARIOS:
+                render_scenario(env, fixture, tmpdir, session_id, cfg, out_dir)
+        else:
+            payload = mutate_session_info(tmpdir, session_id, fixture)
+            raw = json.loads(payload)
+            env['STATUSLINE_TOKEN_WINDOW'] = str(DEMO_TOKEN_WINDOW)
+            os.system('clear -x')
+            animate(env, raw, tmpdir, session_id)
     return 0
 
 
