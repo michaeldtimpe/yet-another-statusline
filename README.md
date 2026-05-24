@@ -1,5 +1,8 @@
 # claude-code-config
-My claude code configuration and helper scripts
+_My claude code configuration and helper scripts_
+
+> [!IMPORTANT]
+> _The statusline requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) in order to display the icons_
 
 To install, run:
 
