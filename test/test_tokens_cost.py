@@ -1,5 +1,7 @@
 from typing import Any
 
+import pytest
+
 import statusline_command as sl
 from helper import strip_ansi
 
@@ -48,6 +50,28 @@ def test_tokens_cost_row2_right_section_begins_with_15_spaces() -> None:
     row2_stripped = strip_ansi(lines[1])
     leader_start = col2 - 1
     assert row2_stripped[leader_start:leader_start + 15] == ' ' * 15
+
+
+def test_tokens_cost_active_arrows_use_font_safe_glyphs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # While token I/O is flowing the row uses Nerd Font heavy arrows
+    # (md-arrow_down_bold / md-arrow_up_bold) that real monospace fonts ship.
+    # The old 🡇/🡅 (Supplemental Arrows-C) are absent from every common font
+    # and rendered as tofu whenever the row refreshed during active flow.
+    monkeypatch.setattr(sl.TokenRate, 'recently_active',
+                        staticmethod(lambda *a, **k: (True, True)))
+    r = Renderer()
+    lines, _cols, _mark = r.tokens_cost(
+        sess_in=1, sess_cache=0, sess_out=2,
+        day_in=3,  day_cache=0, day_out=4,
+        sess_cost=0.01, day_cost=0.02,
+        tok_rate=0, session_id='s', box_width=BOX_WIDTH,
+    )
+    text = '\n'.join(lines)
+    assert sl.GLYPH_TOK_IN_ACTIVE in text
+    assert sl.GLYPH_TOK_OUT_ACTIVE in text
+    assert '\U0001f847' not in text and '\U0001f845' not in text
+    # The replacement glyphs must stay single-column so the box stays aligned.
+    assert _visible_width(lines[0]) == _visible_width(lines[1])
 
 
 def test_tokens_cost_spark_mark_col_lies_inside_sparkline() -> None:
