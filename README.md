@@ -1,5 +1,4 @@
-# claude-code-config
-_My claude code configuration and helper scripts_
+# YAS! (Yet Another Statusline)
 
 > [!IMPORTANT]
 > _The statusline requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) in order to display the icons_
