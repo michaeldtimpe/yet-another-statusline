@@ -126,6 +126,8 @@ GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
 GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
 GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
 GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
+GLYPH_TOK_IN_ACTIVE  = '\U000f072e' # nf-md-arrow_down_bold (token input, while flowing)
+GLYPH_TOK_OUT_ACTIVE = '\U000f0737' # nf-md-arrow_up_bold   (token output, while flowing)
 
 # Dim factor for the in-flight (currently-open) sparkline bucket.
 LIVE_DIM = 0.5
@@ -2005,8 +2007,8 @@ class Renderer:
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
         day_clr = self.day_cost_colour(day_cost)
         in_active, out_active = TokenRate.recently_active(session_id)
-        in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
-        out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
+        in_icon  = f'{GLYPH_TOK_IN_ACTIVE} '  if in_active  else '↓ '  # md-arrow_down_bold or ↓ (both 2 cols)
+        out_icon = f'{GLYPH_TOK_OUT_ACTIVE} ' if out_active else '↑ '  # md-arrow_up_bold or ↑ (both 2 cols)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
         day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
@@ -2564,7 +2566,10 @@ def main() -> None:
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
         return
-    width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
+    # Fill the terminal: render to the full width (less a small margin) instead
+    # of capping at MAX_WIDTH. The layout scales cleanly to any width — the
+    # context bar and sparkline stretch to use the extra columns.
+    width = max(MIN_WIDTH, raw_tw - 6)
 
     sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
 
