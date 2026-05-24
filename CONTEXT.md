@@ -4,13 +4,15 @@ Personal Claude Code configuration and a custom statusline that renders session 
 
 ## Rendering (personal fork)
 
-This fork renders a compact **3-line, borderless** layout built by
-`render_lines()` (no box frame, no wasted space):
+This fork renders a compact **2-line, column-aligned, borderless** grid built by
+`render_lines()` (no box frame, no wasted space). Each column stacks a primary
+field over its detail; columns line up vertically. It is **responsive**: columns
+are sized from content, right-most columns drop when the terminal is too narrow,
+and the location column is truncated as a last resort.
 
 ```
-<path>  ∈ <branch>/<commit> <dirty>   ·   <model> <effort>
-ctx <pct>% (<used>/<size>, comp <pct>%)  ·  ↓<in> ↑<out>  ·  cache <N>  ·  <rate> t/m
-$<session>  ·  ~$<day>  ·  5h <pct>% T-<reset>  ·  7d <pct>%  ·  plan
+<path> ∈ <branch>/<commit> <dirty>   ctx % · ↓in ↑out    $sess session      5h % T-H:MM
+<model> <effort>                     used/size · cache   ~$day · <rate>/m    7d % · plan
 ```
 
 It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels — `5h`,
