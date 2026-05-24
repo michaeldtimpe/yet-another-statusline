@@ -4,24 +4,30 @@ Personal Claude Code configuration and a custom statusline that renders session 
 
 ## Rendering (personal fork)
 
-This fork renders a compact **2-line, column-aligned, borderless** grid built by
-`render_lines()` (no box frame, no wasted space). Each column stacks a primary
-field over its detail; columns line up vertically. It is **responsive**: columns
-are sized from content, right-most columns drop when the terminal is too narrow,
-and the location column is truncated as a last resort.
+This fork renders a single, compact, **borderless** line of ` · `-separated
+segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
-<path> ∈ <branch>/<commit> <dirty>   ctx % · ↓in ↑out    $sess session      5h % T-H:MM
-<model> <effort>                     used/size · cache   ~$day · <rate>/m    7d % · plan
+<path> ∈ <branch>/<commit> <dirty> · ctx % used/size · cache N · <rate>/m
+  · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
 ```
 
-It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels — `5h`,
-`7d`, `t/m`, `$`, `cache`), no animated/gradient colour, no sparkline, no model
-"pill". Every visible symbol stays within standard Unicode (`∈ · ↓ ↑ • * -`), so
-a plain non-Nerd font renders it without tofu (see `test/test_monaco_safe.py`).
-The session id, skills/plugins, and the old box/pill/sparkline machinery were
-dropped from the rendered output; the legacy `build_wide`/border/gradient code
-still exists in the module but is no longer reached by `render()`.
+Field meanings: **ctx** = current context-window occupancy (compaction risk);
+**cache** = cumulative cache-read tokens for the session; **<rate>/m** = token
+throughput per minute; **5h/7d** = rolling plan quotas with time-to-reset;
+**plan** = on a subscription (cost is notional, so not shown); **up** = how long
+the session has been running (started clock time in parens). The **model** is
+pinned last. Cost ($) and cumulative ↓in/↑out were intentionally dropped.
+
+It is **responsive**: each segment has a drop priority; when the line exceeds the
+terminal width the lowest-value segments drop first (uptime → rate → cache →
+limits), the model stays pinned, and the location truncates as a last resort.
+
+It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels), no
+animated/gradient colour, no sparkline, no model "pill". Every visible symbol is
+standard Unicode (`∈ · ↓ ↑ • * -`), so a plain non-Nerd font renders it without
+tofu (see `test/test_monaco_safe.py`). The old box/pill/gradient/section
+machinery was deleted (module is ~1k lines).
 
 ## Language
 

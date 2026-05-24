@@ -910,14 +910,40 @@ def _fmt_reset(resets_at: float) -> str:
     return f'T-{h}:{m:02d}'
 
 
-def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
-    """Single borderless line of ` · `-separated segments. Responsive: segments
-    are dropped right-to-left when the terminal is too narrow, and the location
-    segment is truncated as a last resort. Priority (kept longest, left → right):
-    location, model, context, tokens, cache, rate, 5h, 7d, plan.
+def _session_start(transcript_path: str) -> float | None:
+    """Epoch of the first timestamped transcript entry (≈ when the session began)."""
+    if not transcript_path:
+        return None
+    p = Path(transcript_path)
+    if not p.is_file():
+        return None
+    try:
+        with p.open(errors='ignore') as fh:
+            for ln in fh:
+                if '"timestamp"' not in ln:
+                    continue
+                try:
+                    ts = json.loads(ln).get('timestamp')
+                except (ValueError, TypeError):
+                    continue
+                if ts:
+                    try:
+                        return datetime.fromisoformat(str(ts).replace('Z', '+00:00')).timestamp()
+                    except ValueError:
+                        return None
+    except OSError:
+        pass
+    return None
 
-        <path> ∈ <branch>/<commit> <dirty> · <model> <effort> · ctx % <used>/<size>
-          · ↓in ↑out · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan
+
+def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
+    """Single borderless line of ` · `-separated segments. Each segment carries a
+    drop priority; when the line exceeds `width` the highest-priority segments are
+    dropped (wherever they sit) and the location is truncated as a last resort.
+    Visual order is fixed and the model is pinned last.
+
+        <path> ∈ <branch>/<commit> <dirty> · ctx % used/size · ↓in ↑out · cache N
+          · <rate>/m · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
     """
     SEP   = f' {r.LABEL}·{r.R} '
     ctx   = session.context_window
@@ -931,7 +957,7 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
 
-    # location (always present; truncated last)
+    # location (pinned first; truncated last)
     loc = f'{r.PWD}{session.short_pwd}{r.R}'
     if git.branch:
         loc += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
@@ -953,25 +979,38 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     ctx_clr = r.fill_colour(total / SOFT_LIMIT * 100)
     ctx_seg = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
-    io_seg    = (f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
-                 f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
     cache_seg = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
     rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
 
-    segs = [loc, model, ctx_seg, io_seg, cache_seg, rate_seg]
-
+    # (text, drop_priority): higher drops first; 0 = pinned (truncated, not dropped)
+    segs: list[tuple[str, int]] = [
+        (loc, 0), (ctx_seg, 1), (cache_seg, 6), (rate_seg, 7),
+    ]
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
         reset    = _fmt_reset(five.resets_at)
         five_seg = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
         if reset:
             five_seg += f' {r.COMMIT}{reset}{r.R}'
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
-        segs += [five_seg, seven_seg, f'{r.LABEL}plan{r.R}']
+        segs += [(five_seg, 3), (seven_seg, 4), (f'{r.LABEL}plan{r.R}', 5)]
 
-    # responsive: drop segments right-to-left until it fits; truncate loc last
-    while len(segs) > 1 and _visible_width(SEP.join(segs)) > width:
-        segs.pop()
-    line = SEP.join(segs)
+    start = _session_start(session.transcript_path)
+    if start:
+        started = datetime.fromtimestamp(start).strftime('%H:%M')
+        elapsed = fmt_dur(max(0.0, time.time() - start))
+        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} {r.LABEL}({started}){r.R}', 8))
+
+    segs.append((model, 2))   # pinned visually last; kept over limits/trivia when narrow
+
+    # responsive: drop the highest-priority segment until the line fits
+    def line_w(ss: list) -> int:
+        return _visible_width(SEP.join(t for t, _ in ss))
+    while len(segs) > 1 and line_w(segs) > width:
+        i = max(range(len(segs)), key=lambda j: segs[j][1])
+        if segs[i][1] == 0:
+            break
+        segs.pop(i)
+    line = SEP.join(t for t, _ in segs)
     if _visible_width(line) > width:
         line = _middle_ellipsis(line, width)
     return [line]
