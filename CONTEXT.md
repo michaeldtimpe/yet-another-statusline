@@ -18,7 +18,10 @@ state-coloured label (green clean+synced, yellow pending = uncommitted changes o
 commits to push, red drift/error = behind/diverged/detached) followed by
 `branch/commit` and markers — `+`untracked `~`modified `-`deleted `R`renamed
 `↑`ahead `↓`behind, and `✓` when clean, tracking, and synced; **ctx** = current
-context-window occupancy (compaction risk); **cache** = cumulative cache-read
+context-window occupancy (compaction risk) — the `%` comes from the payload's
+`context_window.used_percentage` (the same field Claude Code's own right-side
+context-low warning uses, so they agree), with raw `total/size` as the fallback
+for older payloads; **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
 notional, so not shown); **`<opened> → <last-refresh>`** = the clock time the

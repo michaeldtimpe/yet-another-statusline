@@ -1048,7 +1048,12 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     if session.model_thinking:
         model += f' {r.MODEL}{ITALIC}{session.model_thinking}{r.R}'
 
-    ctx_pct = (total / size * 100) if size else 0.0
+    # Context %: prefer the payload's `used_percentage` — the same field Claude
+    # Code derives its own context indicator from (the right-side context-low
+    # warning) — so our number never disagrees with it. Fall back to raw
+    # total/size only when an older Claude Code payload omits the field.
+    ctx_pct = (float(ctx.used_percentage) if ctx.used_percentage is not None
+               else ((total / size * 100) if size else 0.0))
     ctx_clr = r.fill_colour(total / SOFT_LIMIT * 100)
     ctx_seg = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
