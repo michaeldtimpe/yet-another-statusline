@@ -2324,14 +2324,28 @@ def resolve_theme(cli_name: str | None) -> Theme:
     return CLAUDE_DARK
 
 
-def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
-    """The compact 3-line, borderless layout.
+def _fmt_reset(resets_at: float) -> str:
+    """'T-H:MM' until a rate-limit window resets, or '' if unknown/past."""
+    if not resets_at:
+        return ''
+    delta = resets_at - time.time()
+    if delta <= 0:
+        return ''
+    h, m = int(delta // 3600), int((delta % 3600) // 60)
+    return f'T-{h}:{m:02d}'
 
-    Line 1: path  ∈ branch/commit dirty  ·  model effort
-    Line 2: ctx %  (used/size, comp %)   ·  ↓in ↑out  ·  cache N  ·  rate t/m
-    Line 3: $session  ·  ~$day  ·  5h % T-…  ·  7d %  ·  plan
+
+def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
+    """Compact 2-line, column-aligned, borderless layout. Each column stacks a
+    primary field (line 1) over its detail (line 2); columns line up vertically.
+    Responsive: right-most columns are dropped, then the location column is
+    truncated, to fit the terminal width.
+
+        <path> ∈ <branch>/<commit> <dirty>   ctx % · ↓in ↑out    $sess session       5h % T-H:MM
+        <model> <effort>                     used/size · cache   ~$day · <rate>/m     7d % · plan
     """
-    SEP = f'  {r.LABEL}·{r.R}  '
+    INSEP = f' {r.LABEL}·{r.R} '
+    GAP   = 3
     ctx   = session.context_window
     total = ctx.total_input_tokens + ctx.total_output_tokens
     size  = ctx.context_window_size or 0
@@ -2343,57 +2357,71 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     tok_rate  = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     sess_cost = effective_session_cost(session, usage)
     day_cost  = compute_day_cost(session.model, token_log)
-    rl        = session.rate_limits
+    five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
 
-    # line 1 — location + model
-    line1 = f'{r.PWD}{session.short_pwd}{r.R}'
+    # column 1 — location over model/effort
+    loc = f'{r.PWD}{session.short_pwd}{r.R}'
     if git.branch:
-        line1 += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
+        loc += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
         if git.commit:
-            line1 += f'{r.COMMIT}/{git.commit}{r.R}'
+            loc += f'{r.COMMIT}/{git.commit}{r.R}'
         dirty = ''
         if git.untracked: dirty += f'{r.DIRTY}•{git.untracked}{r.R}'
         if git.modified:  dirty += f'{r.DIRTY}*{git.modified}{r.R}'
         if git.deleted:   dirty += f'{r.DIRTY}-{git.deleted}{r.R}'
         if git.renamed:   dirty += f'{r.DIRTY}R{git.renamed}{r.R}'
         if dirty:
-            line1 += ' ' + dirty
+            loc += ' ' + dirty
     model = f'{r.model_colour(session.model_name)}{session.model_name}{r.R}'
     if session.model_thinking:
         model += f' {r.MODEL}{ITALIC}{session.model_thinking}{r.R}'
-    line1 += SEP + model
 
-    # line 2 — context + tokens + rate
-    ctx_pct   = (total / size * 100) if size else 0.0
-    comp_raw  = total / SOFT_LIMIT * 100
-    ctx_clr   = r.fill_colour(comp_raw)
-    ctx_field = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
-                 f'{r.LABEL}({r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}, comp '
-                 f'{ctx_clr}{min(comp_raw, 100):.0f}%{r.LABEL}){r.R}')
-    tok_field   = (f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
-                   f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
-    cache_field = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
-    rate_field  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL} t/m{r.R}'
-    line2 = SEP.join([ctx_field, tok_field, cache_field, rate_field])
+    # column 2 — usage: ctx% + io  over  used/size + cache
+    ctx_pct  = (total / size * 100) if size else 0.0
+    ctx_clr  = r.fill_colour(total / SOFT_LIMIT * 100)
+    usage_l1 = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R}{INSEP}'
+                f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
+                f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
+    usage_l2 = (f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}{INSEP}'
+                f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}')
 
-    # line 3 — cost + limits
-    day_clr    = r.day_cost_colour(day_cost)
-    fields3    = [
-        f'{r.COST}${sess_cost:,.2f}{r.R}{r.LABEL} session{r.R}',
-        f'{r.LABEL}~{day_clr}${day_cost:,.2f}{r.R}{r.LABEL} day{r.R}',
-        f'{r.LABEL}5h {r.R}{r.helper(rl.five_hour)}',
-    ]
-    seven = rl.seven_day
-    if seven.used_percentage or seven.resets_at:
-        seven_clr = r.fill_colour(float(seven.used_percentage or 0))
-        fields3.append(f'{r.LABEL}7d {seven_clr}{seven.used_percentage}%{r.R}')
-    five = rl.five_hour
+    # column 3 — money: session  over  day + rate
+    day_clr  = r.day_cost_colour(day_cost)
+    money_l1 = f'{r.COST}${sess_cost:,.2f}{r.R}{r.LABEL} session{r.R}'
+    money_l2 = (f'{r.LABEL}~{day_clr}${day_cost:,.2f}{r.R}{r.LABEL} day{r.R}{INSEP}'
+                f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}')
+
+    cols = [(loc, model), (usage_l1, usage_l2), (money_l1, money_l2)]
+
+    # column 4 — limits (only on a subscription plan, where quotas exist)
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
-        fields3.append(f'{r.LABEL}plan{r.R}')
-    line3 = SEP.join(fields3)
+        reset  = _fmt_reset(five.resets_at)
+        lim_l1 = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
+        if reset:
+            lim_l1 += f' {r.COMMIT}{reset}{r.R}'
+        lim_l2 = (f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}'
+                  f'{int(seven.used_percentage or 0)}%{r.R}{INSEP}{r.LABEL}plan{r.R}')
+        cols.append((lim_l1, lim_l2))
 
-    return [ln if _visible_width(ln) <= width else _middle_ellipsis(ln, width)
-            for ln in (line1, line2, line3)]
+    # responsive fit: drop right-most columns, then truncate the location column
+    def widths(cs: list) -> list[int]:
+        return [max(_visible_width(a), _visible_width(b)) for a, b in cs]
+    def total_w(cs: list) -> int:
+        return sum(widths(cs)) + GAP * (len(cs) - 1)
+    while len(cols) > 2 and total_w(cols) > width:
+        cols.pop()
+    if total_w(cols) > width:
+        new_w = max(12, widths(cols)[0] - (total_w(cols) - width))
+        a, b  = cols[0]
+        cols[0] = (_middle_ellipsis(a, new_w), _middle_ellipsis(b, new_w))
+
+    ws  = widths(cols)
+    gap = ' ' * GAP
+    def pad(s: str, w: int) -> str:
+        return s + ' ' * max(0, w - _visible_width(s))
+    line1 = gap.join(pad(a, w) for (a, _), w in zip(cols, ws)).rstrip()
+    line2 = gap.join(pad(b, w) for (_, b), w in zip(cols, ws)).rstrip()
+    return [line1, line2]
 
 
 def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
