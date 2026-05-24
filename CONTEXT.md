@@ -2,6 +2,18 @@
 
 Personal Claude Code configuration and a custom statusline that renders session usage, cost, and progress at a glance.
 
+## Rendering (personal fork)
+
+This fork renders **flat and Monaco-safe**: no Nerd Font glyphs (sections use
+terse text labels — `5h`, `7d`, `skills`, `plugins`, `t/m`, `$`), no animated
+rainbow border (single static colour), no gradient/sparkline (the context bar is
+a solid zone colour and the token rate is a plain number), and no model "pill"
+(the model + effort render as plain text). Every visible symbol is a named
+constant and stays within standard Unicode (box-drawing, block elements, `↓↑`),
+so a plain non-Nerd font renders it without tofu. The **Session ID** is its own
+left-most field (`sess <id8>`), not woven into the top border. See the
+Monaco-safety regression test in `test/test_monaco_safe.py`.
+
 ## Language
 
 ### Token accounting
@@ -60,6 +72,12 @@ The text colour painted on top of the model-pill background. Two slots per theme
 
 ### Subagents
 
+> **Not rendered in this fork.** The Running Subagent rows and the Task Row were
+> removed because Claude Code's native agent/todo panels already show this — the
+> statusline avoided duplicating it. The data classes (`RunningSubagents`,
+> `TaskList`) are retained for reference/tests but no longer drive any row. The
+> terms below describe the original behaviour.
+
 **Running Subagent**:
 A subagent whose transcript jsonl was written to within the last 20 seconds. Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
 _Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
@@ -83,10 +101,13 @@ _Avoid_: "task TTL" (suggests the tasks themselves expire — they don't, only t
 ### Rate limits
 
 **Five-Hour Limit**:
-The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row's helper suffix as `<pct>% T-<time-to-reset>`.
+The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Shown in the model row labelled `5h <pct>% T-<time-to-reset>`.
 
 **Seven-Day Limit**:
-The weekly quota in `rate_limits.seven_day`. Currently parsed but not rendered.
+The weekly quota in `rate_limits.seven_day`. Shown in the model row after the Five-Hour Limit as `7d <pct>%`.
+
+**Plan marker**:
+A `plan` tag rendered next to the rate-limit quotas whenever any quota is present (subscription plans expose `rate_limits`; metered API/console use does not). It signals that **Session Cost** is the *notional* API-equivalent figure Claude Code reports, not incremental spend.
 
 ## Relationships
 

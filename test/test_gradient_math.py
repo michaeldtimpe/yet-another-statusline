@@ -41,15 +41,13 @@ def test_gradient_color_round_trips_rgb() -> None:
 
 
 
-def test_grad_at_start_of_full_bar() -> None:
-    # col=0, width=10 → t=0/9=0.0; fill=1.0; t <= fill-FADE=0.94 → gradient_color(0.0)
-    assert _r.grad_at(0, width=10, fill=1.0) == _r.gradient_color(0.0)
-
-
-
-def test_grad_at_past_zero_fill() -> None:
-    # fill=0.0 → fill <= 0 → CLR_BORDER_OFF immediately
-    assert _r.grad_at(9, width=10, fill=0.0) == sl.CLR_BORDER_OFF
+def test_grad_at_is_static_border() -> None:
+    # Flat renderer: grad_at returns one static border colour regardless of
+    # column or fill (no positional rainbow gradient, no fill-based fade).
+    c = _r.grad_at(0, width=10, fill=1.0)
+    assert c == _r.grad_at(9, width=10, fill=1.0)
+    assert c == _r.grad_at(5, width=10, fill=0.0)
+    assert c.startswith('\033[')
 
 
 # spark_rgb dim factor

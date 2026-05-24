@@ -150,9 +150,13 @@ class _FrozenDatetime:
 
 
 @pytest.fixture
-def frozen(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+def frozen(monkeypatch: pytest.MonkeyPatch, tmp_path):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(sl.time, 'time', lambda: float(FROZEN_EPOCH))
     monkeypatch.setattr(sl, 'datetime', _FrozenDatetime)
+    # Hermetic HOME: empty token/rate logs so the snapshot doesn't depend on the
+    # developer's real ~/.claude state (previously a source of flakiness).
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
     yield
 
 

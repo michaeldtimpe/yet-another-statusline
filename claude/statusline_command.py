@@ -33,7 +33,7 @@ CLAUDE_DARK  = themes.CLAUDE_DARK
 class BarChars:
     FILLED = '█'
     HEAVY  = '▆'
-    MID    = ''
+    MID    = ''
     EMPTY  = '░'
 
 
@@ -109,40 +109,25 @@ CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
 
-# Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
-# chat round-trips never lose the bytes. Render only in a Nerd-Font-capable
-# terminal.
-ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
-ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
-GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
-GLYPH_THINKING = '\U000f1a53' # nf-md-brain
-GLYPH_FAST     = '\uef76'     # nf-cod-zap (shown when fast_mode is on)
-GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
-GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
-GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
-GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
-GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
-GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
-GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
-GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
-GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
-GLYPH_TOK_IN_ACTIVE  = '\U000f072e' # nf-md-arrow_down_bold (token input, while flowing)
-GLYPH_TOK_OUT_ACTIVE = '\U000f0737' # nf-md-arrow_up_bold   (token output, while flowing)
-
-# Dim factor for the in-flight (currently-open) sparkline bucket.
-LIVE_DIM = 0.5
-
-# Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
-# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
-# peak cell pairs with a "fall" char on the next cell to form a /\ shape.
-SPARK_RISE_SMALL  = '\U0001fb48'  # 🭈 small rise (bot row, idx 1–3)
-SPARK_FALL_SMALL  = '\U0001fb3d'  # 🬽 small fall (bot row, idx 1–3)
-SPARK_RISE_MED    = '\U0001fb4a'  # 🭊 medium rise (bot row, idx 4–7)
-SPARK_FALL_MED    = '\U0001fb3f'  # 🬿 medium fall (bot row, idx 4–7)
-SPARK_RISE_TALL   = '\U0001fb45'  # 🭅 tall rise (bot row, idx 8+)
-SPARK_FALL_TALL   = '\U0001fb50'  # 🭐 tall fall (bot row, idx 8+)
-SPARK_RISE_TOP    = '\U0001fb4b'  # 🭋 top-row rise (idx 9+)
-SPARK_FALL_TOP    = '\U0001fb40'  # 🭀 top-row fall (idx 9+)
+# Section markers \u2014 plain text / standard-Unicode only (Monaco-safe; NO Nerd
+# Font Private Use Area glyphs). Kept as named constants so every visible symbol
+# is auditable and future edits can't silently reintroduce PUA drift.
+ICON_COST     = ''         # cost row \u2014 the '$' lives in the formatted figure
+ICON_TOK_RATE = ''         # token-rate \u2014 the 't/m' suffix carries the meaning
+GLYPH_MODEL    = ''        # model row \u2014 the name stands alone
+GLYPH_THINKING = ''        # effort renders as a word (e.g. 'xhigh')
+GLYPH_FAST     = ''        # fast-mode renders via the effort word
+GLYPH_FOLDER   = ''        # path row \u2014 the path stands alone
+GLYPH_SUBAGENT = ''        # (subagent rows removed)
+GLYPH_SUBAGENT_ROW = '>'   # (subagent rows removed; ASCII fallback)
+GLYPH_TASKS    = ''        # (task row removed)
+GLYPH_SKILLS  = 'skills'   # skills label
+GLYPH_PLUGINS = 'plugins'  # plugins label
+GLYPH_HELPER   = '5h'      # five-hour rate-limit label
+GLYPH_TRASH    = '-'       # git deleted count
+GLYPH_RENAMED  = 'R'       # git renamed count
+GLYPH_TOK_IN_ACTIVE  = '\u2193' # token input  (standard arrow; no active/idle split)
+GLYPH_TOK_OUT_ACTIVE = '\u2191' # token output (standard arrow)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block
@@ -1288,6 +1273,7 @@ class GradientEngine:
         self.GREY_RGB    = t.grey_rgb
         self.SPARK_STOPS = t.spark_stops
         self.BORDER_OFF  = t.border_off
+        self.BORDER      = t.border
 
     def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
@@ -1326,22 +1312,10 @@ class GradientEngine:
         return f'\033[38;2;{r};{g};{b}m'
 
     def grad_at(self, col: int, width: int, dim: float = 1.0, fill: float = 1.0) -> str:
-        denom = max(1, width - 1)
-        t = col / denom
-        if fill <= 0:
-            return self.BORDER_OFF
-        fade = self.FADE
-        if t <= fill - fade:
-            return self.gradient_color(t, dim)
-        if t >= fill + fade:
-            return self.BORDER_OFF
-        er, eg, eb = self.gradient_rgb(min(t, fill), dim)
-        gr, gg, gb = self.GREY_RGB
-        u = max(0.0, min(1.0, (t - (fill - fade)) / (2 * fade)))
-        r = int(er + (gr - er) * u)
-        g = int(eg + (gg - eg) * u)
-        b = int(eb + (gb - eb) * u)
-        return f'\033[38;2;{r};{g};{b}m'
+        # Flat renderer: the border is a single static theme colour — no
+        # positional rainbow gradient and no fill-based fade. (col/width/dim/fill
+        # are kept in the signature for call-site compatibility.)
+        return self.BORDER
 
     def gradient_bar(self, filled: int, bar_w: int) -> str:
         if filled <= 0 or bar_w <= 0:
@@ -1353,70 +1327,6 @@ class GradientEngine:
         if filled <= bar_w:
             parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
-
-    def _spark_flat(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 8:
-            return ' ', self.SPARK_CHARS[idx - 1]
-        return self.SPARK_CHARS[idx - 9], '█'
-
-    def _spark_rise(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_RISE_SMALL
-        if idx <= 7:
-            return ' ', SPARK_RISE_MED
-        if idx <= 8:
-            return ' ', SPARK_RISE_TALL
-        return SPARK_RISE_TOP, SPARK_RISE_TALL
-
-    def _spark_fall(self, idx: int) -> tuple[str, str]:
-        if idx <= 0:
-            return ' ', self.SPARK_CHARS[0]
-        if idx <= 3:
-            return ' ', SPARK_FALL_SMALL
-        if idx <= 7:
-            return ' ', SPARK_FALL_MED
-        if idx <= 8:
-            return ' ', SPARK_FALL_TALL
-        return SPARK_FALL_TOP, SPARK_FALL_TALL
-
-    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
-        if not history:
-            return '', ''
-        max_val = max(history)
-        indices = [
-            min(int(((v / max_val) if max_val > 0 else 0.0) * 16), 16)
-            for v in history
-        ]
-        last_i  = len(indices) - 1
-        top_parts = []
-        bot_parts = []
-        for i, idx in enumerate(indices):
-            prev_idx = indices[i - 1] if i > 0 else 0
-            if idx > prev_idx:
-                top_ch, bot_ch = self._spark_rise(idx)
-                tint_idx       = idx
-            elif prev_idx > idx:
-                top_ch, bot_ch = self._spark_fall(prev_idx)
-                tint_idx       = prev_idx
-            else:
-                top_ch, bot_ch = self._spark_flat(idx)
-                tint_idx       = idx
-            ratio     = tint_idx / 16.0
-            ratio_bot = ratio * 0.5
-            ratio_top = 0.5 + ratio * 0.5
-            if live and i == last_i:
-                bot_clr = self.spark_color(ratio_bot, dim=LIVE_DIM)
-                top_clr = self.spark_color(ratio_top, dim=LIVE_DIM)
-            else:
-                bot_clr = self.spark_color(ratio_bot)
-                top_clr = self.spark_color(ratio_top)
-            top_parts.append(f'{top_clr}{top_ch}{RESET}')
-            bot_parts.append(f'{bot_clr}{bot_ch}{RESET}')
-        return ''.join(top_parts), ''.join(bot_parts)
 
 
 class BorderRenderer:
@@ -1592,7 +1502,9 @@ class Renderer:
         self.spec_empty_ansi = t.spec_empty_ansi
 
     def _model_bg_pct(self, effort_level: str) -> int:
-        return LEVEL_PCT.get(effort_level.lower(), 0)
+        # Flat renderer: the gradient "pill" behind the model is disabled, so the
+        # model row always renders as plain text. Effort still shows as a word.
+        return 0
 
     def _model_anchor_pair(self, model_name: str) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
         mc    = self.theme.models[model_key(model_name)]
@@ -1667,9 +1579,6 @@ class Renderer:
         color    = self.gradient.grad_at(col - 1, width, fill=fill)
         trailing = ' ' if leader else '  '
         return f'  {color}│{self.R}{trailing}'
-
-    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
-        return self.gradient.sparkline(history, live)
 
     def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         return self.gradient.spark_rgb(t, dim)
@@ -1872,17 +1781,22 @@ class Renderer:
             pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
             right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
         elif model_thinking:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+            right_text = f'{model_clr}{model_name}{self.R} {model_clr}{ITALIC}{model_thinking}{RESET}'
         else:
-            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
+            right_text = f'{model_clr}{model_name}{self.R}'
 
         right_w = _visible_width(right_text)
 
-        helper_text = f'{c_helper}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        five = rate_limits.five_hour
+        helper_text = f'{self.LABEL}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(five)}{self.R}'
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
+            helper_text += f' {self.LABEL}| 7d {seven_clr}{seven_day.used_percentage}%{self.R}'
+        # Subscription plan (rate-limit quotas present) => the cost figure is
+        # notional API-equivalent, not real spend. Flag it next to the quotas.
+        if five.resets_at or seven_day.resets_at or five.used_percentage or seven_day.used_percentage:
+            helper_text += f'  {self.LABEL}plan{self.R}'
 
         return helper_text, right_text, right_w
 
@@ -1930,83 +1844,12 @@ class Renderer:
         return rate_text, right_text, right_w
 
     def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
-        step = rainbow_step()
-        c_skills = rainbow_at(step, 3)
-        c_plugins = rainbow_at(step, 6)
         extras = []
         if skills_count > 0:
-            extras.append(f'{c_skills}{BOLD}{GLYPH_SKILLS}  {self.R}{self.SKILLS}{skills_names}{self.R}')
+            extras.append(f'{self.LABEL}{BOLD}{GLYPH_SKILLS}{self.R} {self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
-            extras.append(f'{c_plugins}{BOLD}{GLYPH_PLUGINS}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
+            extras.append(f'{self.LABEL}{BOLD}{GLYPH_PLUGINS}{self.R} {self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
-
-    SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
-
-    def subagent_row(self, sub: RunningSubagent, width: int) -> str:
-        now    = time.time()
-        dur    = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
-        bin_s  = fmt_tok(sub.billed_in).rjust(self.SUBAGENT_TOK_W)
-        out_s  = fmt_tok(sub.output).rjust(self.SUBAGENT_TOK_W)
-        dur_s  = fmt_dur(dur).rjust(5)
-
-        right_text = (
-            f'{self.LABEL}{BOLD}↓{self.R}{self.CTX}{bin_s}{self.R}'
-            f' {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
-            f'   {self.CTX}{dur_s}{self.R}'
-        )
-        right_w = _visible_width(right_text)
-
-        step      = rainbow_step()
-        c_marker  = rainbow_at(step, 12)
-        type_text = sub.agent_type or '?'
-        desc_text = sub.description or ''
-
-        target_w = width - 4  # leave 1 col gap before the right │, matching sibling rows
-        head_w   = 3 + len(type_text) + 3  # '▶  ' + type + ' · '
-        budget   = max(0, target_w - head_w - 1 - right_w)
-        if len(desc_text) > budget:
-            desc_text = (desc_text[:budget - 1] + '…') if budget > 0 else ''
-
-        left_text = (
-            f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
-            f'{self.SKILLS}{type_text}{self.R}'
-            f' {self.LABEL}·{self.R} '
-            f'{self.CTX}{desc_text}{self.R}'
-        )
-        left_w = head_w + len(desc_text)
-        pad_w  = max(1, target_w - left_w - right_w)
-        return f'{left_text}{" " * pad_w}{right_text}'
-
-    def task_row(self, tasks: TaskList, width: int, compact: bool = False) -> str:
-        step    = rainbow_step()
-        c_glyph = rainbow_at(step, 9)
-        done    = tasks.completed
-        total   = tasks.total
-        count_s = f'{done}/{total}'
-
-        head = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}  {self.SKILLS}{count_s}{self.R}'
-        if compact:
-            return head
-
-        if done == total:
-            text = ''
-        else:
-            active = tasks.active
-            if active is not None:
-                text = active.active_form or active.subject
-            else:
-                nxt = tasks.next_pending
-                text = nxt.subject if nxt else ''
-
-        if not text:
-            return head
-
-        target_w = width - 4
-        head_w   = 3 + len(count_s) + 2  # glyph + '  ' + count + '  '
-        budget   = max(0, target_w - head_w)
-        if len(text) > budget:
-            text = (text[:budget - 1] + '…') if budget > 0 else ''
-        return f'{head}  {self.CTX}{text}{self.R}'
 
     RATE_W  = 6
     IN_W    = 6
@@ -2015,9 +1858,8 @@ class Renderer:
 
     def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
         day_clr = self.day_cost_colour(day_cost)
-        in_active, out_active = TokenRate.recently_active(session_id)
-        in_icon  = f'{GLYPH_TOK_IN_ACTIVE} '  if in_active  else '↓ '  # md-arrow_down_bold or ↓ (both 2 cols)
-        out_icon = f'{GLYPH_TOK_OUT_ACTIVE} ' if out_active else '↑ '  # md-arrow_up_bold or ↑ (both 2 cols)
+        in_icon  = f'{GLYPH_TOK_IN_ACTIVE} '   # ↓ (standard arrow)
+        out_icon = f'{GLYPH_TOK_OUT_ACTIVE} '  # ↑ (standard arrow)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
         day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
@@ -2039,46 +1881,21 @@ class Renderer:
         end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
         end2 = f'  {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
-        label_w = 15
         w_middle = _visible_width(middle1)
         w_end    = max(_visible_width(end1), _visible_width(end2))
-        content_w = box_width - 3
-        leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
 
-        col1 = w_middle + 5                  # 1-indexed position of vsep │
+        col1 = w_middle + 5                   # 1-indexed position of vsep │
         col2 = w_middle + vsep_w + w_end + 5  # 1-indexed position of vsep_leader │
         vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
         vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
-        # bar_w = leader_w - label_w
 
-        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
-        rate_label_w = _visible_width(rate_label)
-        rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
-        bar_w = leader_w - rate_label_w
-
-        if bar_w <= 0:
-            leader1 = rate_label_padded
-            leader2 = ' ' * label_w
-        else:
-            if session_id:
-                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
-                top_row, bot_row = self.sparkline(spark_history[::-1], live=True)
-            else:
-                top_row, bot_row = ' ' * bar_w, ' ' * bar_w
-            leader1 = f'{rate_label_padded}{top_row}'
-            # leader2 = f'{" " * label_w}{bot_row}'
-            leader2 = f'{" " * rate_label_w}{bot_row}'
-
-        # 1-indexed column of the WINDOW (60s) tick inside the sparkline. History
-        # spans WINDOW*2 (=120s) across bar_w buckets reversed so index 0 is "now",
-        # which puts the 60s boundary at bar_w // 2. col2 is the vsep_leader │
-        # column; sparkline starts rate_label_w cells past that.
-        mark_col = col2 + rate_label_w + (bar_w // 2) if bar_w > 0 else 0
+        # Flat renderer: no sparkline — just the numeric token rate.
+        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE}{self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
 
         return [
-            f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
-            f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
-        ], (col1, col2), mark_col
+            f'{middle1}{vsep}{end1}{vsep_leader}{rate_label}',
+            f'{middle2}{vsep}{end2}{vsep_leader}',
+        ], (col1, col2), 0
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -2146,8 +1963,8 @@ class Renderer:
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
-            return f'{a}{self.R} {prefix}{bar}'
+            bar    = f'{a}{BarChars.FILLED * filled}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
+            return f'{a}{self.R} {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
         secondary = ''
@@ -2158,8 +1975,8 @@ class Renderer:
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
-        return f'{bar_clr}{self.R} {prefix}{bar}'
+        bar    = f'{bar_clr}{BarChars.FILLED * filled}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        return f'{bar_clr}{self.R} {prefix}{bar}'
 
 
     def context_line_compact(self, ctx: ContextWindow, available: int) -> str:
@@ -2174,7 +1991,7 @@ class Renderer:
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-            bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
+            bar    = f'{a}{BarChars.FILLED * filled}{self.R}{a}{BarChars.EMPTY * empty}{self.R}'
             return f' {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
@@ -2182,7 +1999,7 @@ class Renderer:
         bar_w   = max(4, available - _visible_width(prefix) - 3)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
+        bar     = f'{bar_clr}{BarChars.FILLED * filled}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
         return f' {prefix}{bar}'
 
     SPEC_GRADIENTS = [
@@ -2219,15 +2036,10 @@ class Renderer:
         )
 
     def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
+        # Flat renderer: solid single-colour progress bar (no per-column gradient).
         if filled <= 0 or bar_w <= 0:
             return ''
-        denom = max(1, bar_w - 1)
-        three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
-        parts = []
-        for i in range(filled):
-            r, g, b = self._spec_rgb_at(i / denom, idx, three_stops)
-            parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
-        return ''.join(parts)
+        return f'{self.BAR_FILL}{BarChars.HEAVY * filled}'
 
     def openspec_bar(self, name: str, done: int, total: int, box_width: int = 80, title_w: int = 25, idx: int = 0) -> str:
         pct = done * 100 // total
@@ -2241,14 +2053,7 @@ class Renderer:
         empty = bar_w - filled
 
         bar_filled = self.spec_gradient_bar(filled, bar_w, idx)
-        if filled > 0 and empty > 0:
-            denom = max(1, bar_w - 1)
-            three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
-            cr, cg, cb = self._spec_rgb_at(filled / denom, idx, three_stops)
-            r, g, b = int(cr * 0.45), int(cg * 0.45), int(cb * 0.45)
-            bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
-            empty -= 1
-        bar_empty = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
+        bar_empty  = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
 
         return (
             f'{CLR_WHITE_BRT}{ITALIC}{title}{RESET}{self.R} '
@@ -2379,11 +2184,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         top_row     = RowSpec('top_border', downs=(path_div_col,))
         content_row = RowSpec('content', content=full)
         sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
-    tasks = TaskList.from_session(session.transcript_path)
     rows: list[RowSpec] = [top_row, content_row, sep_row]
-    if tasks.is_visible():
-        rows.append(RowSpec('content', content=r.task_row(tasks, width, compact=True)))
-        rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
     rows.append(RowSpec('bottom_border'))
     spec.rows = rows
@@ -2409,8 +2210,6 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     tok_rate      = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     sess_cost     = effective_session_cost(session, usage)
     day_cost      = compute_day_cost(session.model, token_log)
-    subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
-    tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
     git          = GitInfo.from_cwd(session.cwd)
@@ -2438,7 +2237,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
 
     vsep_w   = 5
     helper_w = _visible_width(helper_text)
-    target_w = (width - 4) - vsep_w - helper_w - right_w
+    # Session id as its own left-most field (no longer woven into the border).
+    sess_field = f'{r.SESSION}sess {session.session_id[:8]}{r.R}'
+    sess_w     = _visible_width(sess_field) + 2   # field + 2-space gap before path
+    target_w = (width - 4) - sess_w - vsep_w - helper_w - right_w
     line_path = r.fit_path(session.short_pwd, git, elapsed, target_w, compact_only=False)
     path_w   = _visible_width(line_path)
 
@@ -2446,16 +2248,17 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     if pill_pct:
         pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
-    path_div_col = 3 + path_w + 2
+    left = f'{sess_field}  {line_path}'
+    path_div_col = 3 + sess_w + path_w + 2
     vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
-    content = f'{line_path}{vsep}{helper_text}'
+    content = f'{left}{vsep}{helper_text}'
     if pill_pct:
         rows += [
             RowSpec('top_border', downs=(path_div_col,), pill=pill),
             RowSpec('content', content=content, right_pill=right_text),
         ]
     else:
-        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
+        pad = max(1, (width - 3) - (sess_w + path_w + vsep_w + helper_w + right_w))
         content_full = f'{content}{" " * pad}{right_text}'
         rows += [
             RowSpec('top_border', downs=(path_div_col,)),
@@ -2470,15 +2273,6 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim', ups=next_ups))
     else:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
-
-    if tasks.is_visible():
-        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
-        rows.append(RowSpec('separator_dim'))
-
-    if subagents.subagents:
-        for sub in subagents.subagents:
-            rows.append(RowSpec('content', content=r.subagent_row(sub, width)))
-        rows.append(RowSpec('separator_dim'))
 
     rows.append(RowSpec('content', content=line_context))
     tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
@@ -2502,7 +2296,7 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
     lines: list[str] = []
     for row in spec.rows:
         if row.kind == 'top_border':
-            lines.append(r.border_top(spec.width, spec.session_id, downs=row.downs, fill=spec.fill, pill=row.pill))
+            lines.append(r.border_top(spec.width, '', downs=row.downs, fill=spec.fill, pill=row.pill))
         elif row.kind == 'bottom_border':
             lines.append(r.border_bottom(spec.width, ups=row.ups, fill=spec.fill))
         elif row.kind == 'separator':

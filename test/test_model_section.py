@@ -34,12 +34,14 @@ def test_model_right_section_pill_inactive_plain_text() -> None:
     assert w == _visible_width(right)
 
 
-def test_model_right_section_pill_active_wraps_with_caps() -> None:
+def test_model_right_section_effort_shown_as_plain_text() -> None:
+    # Flat renderer: the gradient pill is disabled, so even with an active effort
+    # the model row is plain text (no PILL caps) with the effort word appended.
     r = Renderer()
     _helper, right, w = r.model_right_section('Opus 4.7 1M', 'high', RateLimits(), effort_level='high')
     stripped = strip_ansi(right)
-    assert stripped.startswith(sl.PILL_LEFT)
-    assert stripped.endswith(sl.PILL_RIGHT)
+    assert sl.PILL_LEFT not in stripped
+    assert sl.PILL_RIGHT not in stripped
     assert 'Opus 4.7 1M' in stripped
     assert 'high' in stripped
     assert w == _visible_width(right)
@@ -140,43 +142,24 @@ def _narrow_session(model_name: str = 'Sonnet 4.6', effort_level: str = '', thin
     )
 
 
-class TestNarrowPillOnRight:
-    def test_pill_placed_at_right_edge_when_thinking_active(self) -> None:
-        r = Renderer()
-        width = 50
-        session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, width, r)
-        pill = next(row.pill for row in spec.rows if row.pill is not None)
-        assert pill.end == width, 'pill must end at right edge'
-        assert pill.start > 1,   'pill must not start at left edge'
-
-    def test_content_row_uses_right_pill_when_thinking_active(self) -> None:
+class TestNarrowNoPill:
+    # Flat renderer: the gradient pill is disabled, so narrow never emits a pill,
+    # regardless of thinking/effort state.
+    def test_no_pill_even_when_thinking_active(self) -> None:
         r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
         spec = sl.build_narrow(session, 50, r)
-        content_rows = [row for row in spec.rows if row.kind == 'content']
-        model_row = content_rows[0]
-        assert model_row.right_pill != '', 'model row must use right_pill when pill active'
-        assert not model_row.pill_flush,   'pill_flush must be False when right_pill is used'
+        assert all(row.pill is None for row in spec.rows)
 
     def test_no_pill_when_thinking_disabled(self) -> None:
         r = Renderer()
         session = _narrow_session('Sonnet 4.6', thinking=False)
         spec = sl.build_narrow(session, 50, r)
-        assert all(row.pill is None for row in spec.rows), 'no pill when thinking disabled'
+        assert all(row.pill is None for row in spec.rows)
 
     def test_rendered_top_border_starts_with_normal_corner(self) -> None:
         r = Renderer()
         session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
         spec = sl.build_narrow(session, 50, r)
         lines = sl.render_layout(spec, r)
-        top = strip_ansi(lines[0])
-        assert top.startswith('╭'), 'top-left corner must be ╭ when pill is on right'
-
-    def test_rendered_separator_ends_with_pill_bottom(self) -> None:
-        r = Renderer()
-        session = _narrow_session('Opus 4.7', effort_level='high', thinking=True)
-        spec = sl.build_narrow(session, 50, r)
-        lines = sl.render_layout(spec, r)
-        sep = strip_ansi(lines[2])
-        assert sep.endswith(sl.PILL_BR), 'separator must end with PILL_BR when pill is on right'
+        assert strip_ansi(lines[0]).startswith('╭')

@@ -11,10 +11,11 @@ def test_gradient_bar_zero_fill_is_empty() -> None:
 
 
 def test_gradient_bar_visible_width() -> None:
-    # filled=5 → 5 FILLED glyphs + 1 MID leading-edge glyph = 6 visible chars
+    # filled=5 → 5 FILLED glyphs (the PUA MID leading-edge glyph was removed for
+    # Monaco safety, so BarChars.MID is now empty).
     result = _r.gradient_bar(5, 30)
     stripped = strip_ansi(result)
-    assert sl._visible_width(stripped) == 6
+    assert sl._visible_width(stripped) == 5
 
 
 def test_gradient_bar_mid_glyph_has_no_background() -> None:
