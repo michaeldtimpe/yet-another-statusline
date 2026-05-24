@@ -9,6 +9,20 @@ To install, run:
 make install
 ```
 
+## Themes
+
+Pick a theme in priority order: `--theme=<name>` flag → `CLAUDE_STATUSLINE_THEME`
+env var → `~/.claude/statusline-theme` file (contains just the name) → default
+(`claude-dark`).
+
+Available: `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha`,
+`llmtop`. The `llmtop` theme is light-background and draws from the terminal's own
+ANSI palette (indices 0–15), so it tracks your iTerm2/terminal profile colours.
+
+```bash
+echo llmtop > ~/.claude/statusline-theme   # persist a selection
+```
+
 ## Demo
 
 <img width="1264" height="552" alt="statusline-demo" src="https://github.com/user-attachments/assets/64e941b8-90a4-4ec8-98e0-973a57c04212" />

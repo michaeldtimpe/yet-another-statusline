@@ -29,6 +29,7 @@ SESSION  = (Path(__file__).parent.parent / 'claude' / 'statusline'
 
 EXPECTED_THEMES = {
     'claude-dark', 'claude-light', 'catppuccin-latte', 'catppuccin-mocha',
+    'llmtop',
 }
 
 
@@ -107,6 +108,19 @@ def test_resolve_theme_unknown_name_falls_through(
 ) -> None:
     monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
     assert sl.resolve_theme('no-such-theme') is sl.CLAUDE_DARK
+
+
+def test_resolve_theme_llmtop_via_config_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
+) -> None:
+    # The user's selection mechanism: ~/.claude/statusline-theme = "llmtop"
+    # must override the default with no CLI/env set.
+    monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
+    (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
+    (tmp_home / '.claude' / 'statusline-theme').write_text('llmtop\n')
+    resolved = sl.resolve_theme(None)
+    assert resolved is THEMES['llmtop']
+    assert resolved.name == 'llmtop'
 
 
 # Byte-identity snapshot — claude-dark × 3 layouts
