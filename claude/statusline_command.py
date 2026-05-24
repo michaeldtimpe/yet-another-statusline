@@ -191,10 +191,6 @@ class Pill:
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
-    # Supplemental Arrows-C (U+1F800-U+1F8FF) are EAW=N despite being in the
-    # emoji range — exclude them so arrow icons like 🡅/🡇 count as 1 col.
-    if 0x1F800 <= cp <= 0x1F8FF:
-        return False
     return 0x1F300 <= cp <= 0x1FAFF
 
 
@@ -389,7 +385,10 @@ class Workspace:
 
 @dataclass
 class Cost:
-    total_cost_usd: float = 0.0
+    # None means the payload omitted the field (older Claude Code) — distinct
+    # from a real 0.0, so the renderer can fall back to the estimate only when
+    # the authoritative cost is genuinely absent.
+    total_cost_usd: float | None = None
     total_duration_ms: int = 0
     total_api_duration_ms: int = 0
     total_lines_added: int = 0
@@ -398,7 +397,7 @@ class Cost:
     @classmethod
     def from_dict(cls, d: dict) -> Cost:
         return cls(
-            total_cost_usd        = d.get('total_cost_usd', 0.0),
+            total_cost_usd        = d.get('total_cost_usd'),
             total_duration_ms     = d.get('total_duration_ms', 0),
             total_api_duration_ms = d.get('total_api_duration_ms', 0),
             total_lines_added     = d.get('total_lines_added', 0),
@@ -531,6 +530,16 @@ def compute_session_cost(model: Model, usage: TranscriptUsage) -> float:
 
 def compute_day_cost(model: Model, token_log: TokenLog) -> float:
     return TokenAccounting.day_cost(model, token_log)
+
+
+def effective_session_cost(session: SessionInfo, usage: TranscriptUsage) -> float:
+    """Session cost, preferring the payload's authoritative billed figure
+    (`cost.total_cost_usd`). Falls back to the token×rate estimate only when the
+    payload omitted it (older Claude Code); a real 0.0 is honoured."""
+    payload = session.cost.total_cost_usd
+    if isinstance(payload, (int, float)) and not isinstance(payload, bool) and payload >= 0:
+        return float(payload)
+    return compute_session_cost(session.model, usage)
 
 
 @dataclass
@@ -2023,8 +2032,8 @@ class Renderer:
         middle1 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}'
         middle2 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK_DAY}{day_out_s}{self.R}'
 
-        cost1 = f'${sess_cost:,.2f}'
-        cost2 = f'${day_cost:,.2f}'
+        cost1 = f'${sess_cost:,.2f}'         # session: authoritative billed cost
+        cost2 = f'~${day_cost:,.2f}'         # day: rate-card estimate (see CONTEXT.md)
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
 
         end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
@@ -2125,6 +2134,7 @@ class Renderer:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
         fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
         pct_soft     = total_tokens / SOFT_LIMIT * 100
+        pct_disp     = min(pct_soft, 100)   # shown capped at 100%; raw drives colour
 
         if total_tokens >= SOFT_LIMIT:
             a = BOLD + self.alert
@@ -2132,7 +2142,7 @@ class Renderer:
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
                 secondary = f' {a}({pct_model:.0f}%){self.R}'
-            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_soft:.0f}%{self.R} '
+            prefix = f'{secondary} {a}{fmt_tok(total_tokens)}{self.R} {a}{BOLD}{pct_disp:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -2144,7 +2154,7 @@ class Renderer:
         if ctx.context_window_size > 0:
             pct_model = total_tokens / ctx.context_window_size * 100
             secondary = f' {self.DIM_GREEN}({pct_model:.0f}%){self.R}'
-        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_soft:.0f}% '
+        prefix = f'{bar_clr}{self.R}{self.DIM_GREEN}{fmt_tok(total_tokens)}{self.R}{secondary} {bar_clr}{BOLD}{pct_disp:.0f}% '
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -2156,10 +2166,11 @@ class Renderer:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
         fill_ratio   = min(total_tokens / SOFT_LIMIT, 1.0)
         pct_soft     = total_tokens / SOFT_LIMIT * 100
+        pct_disp     = min(pct_soft, 100)   # shown capped at 100%; raw drives colour
 
         if total_tokens >= SOFT_LIMIT:
             a      = BOLD + self.alert
-            prefix = f'{a}{pct_soft:.0f}%{self.R} '
+            prefix = f'{a}{pct_disp:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
             empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -2167,7 +2178,7 @@ class Renderer:
             return f' {prefix}{bar}'
 
         bar_clr = self.fill_colour(pct_soft)
-        prefix  = f'{bar_clr}{BOLD}{pct_soft:.0f}%{self.R} '
+        prefix  = f'{bar_clr}{BOLD}{pct_disp:.0f}%{self.R} '
         bar_w   = max(4, available - _visible_width(prefix) - 3)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
@@ -2396,7 +2407,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     today         = datetime.now().strftime('%Y-%m-%d')
     token_log     = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
     tok_rate      = TokenRate.update(session.session_id, usage.billed_in, usage.out)
-    sess_cost     = compute_session_cost(session.model, usage)
+    sess_cost     = effective_session_cost(session, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
     tasks         = TaskList.from_session(session.transcript_path)
@@ -2533,6 +2544,22 @@ def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: The
     return '\n'.join(render_layout(spec, r))
 
 
+def prune_output_dir(out_dir: Path, keep: int = 50) -> None:
+    """Keep only the `keep` most recent statusline payloads (by mtime) so the
+    directory can't grow unbounded. Count-based (not age-based) so an idle
+    session still retains recent history for mon.py. Best-effort."""
+    try:
+        snaps = sorted(out_dir.glob('statusline.*.json'),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    for stale in snaps[keep:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
 def main() -> None:
     bg_shift   = 'warm'
     theme_name: str | None = None
@@ -2560,6 +2587,7 @@ def main() -> None:
         out_dir = HOME / '.claude' / 'statusline-output'
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / f'statusline.{int(time.time())}.json').write_text(json.dumps(info))
+        prune_output_dir(out_dir)
     except OSError:
         pass
 

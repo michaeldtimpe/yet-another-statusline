@@ -52,6 +52,15 @@ def test_tokens_cost_row2_right_section_begins_with_15_spaces() -> None:
     assert row2_stripped[leader_start:leader_start + 15] == ' ' * 15
 
 
+def test_tokens_cost_day_cost_marked_estimate() -> None:
+    # Day cost is a rate-card estimate and must be flagged with a leading ~,
+    # while the session cost (authoritative) is not.
+    lines, _cols, _mark = _call()
+    text = strip_ansi('\n'.join(lines))
+    assert '~$' in text          # day cost estimate marker
+    assert text.count('~$') == 1  # only the day row, not the session row
+
+
 def test_tokens_cost_active_arrows_use_font_safe_glyphs(monkeypatch: pytest.MonkeyPatch) -> None:
     # While token I/O is flowing the row uses Nerd Font heavy arrows
     # (md-arrow_down_bold / md-arrow_up_bold) that real monospace fonts ship.

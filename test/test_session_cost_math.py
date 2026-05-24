@@ -58,3 +58,36 @@ def test_day_cost_via_token_log() -> None:
     model = sl.Model(id='claude-sonnet-4-6', display_name='Sonnet')
     cost = sl.compute_day_cost(model, log)
     assert cost == pytest.approx(3.06, abs=1e-9)
+
+
+
+def test_effective_session_cost_prefers_payload() -> None:
+    # Payload billed cost is authoritative even when the token estimate is huge.
+    session = sl.SessionInfo.from_dict({
+        'model': {'id': 'claude-opus-4-7', 'display_name': 'Opus 4.7'},
+        'cost': {'total_cost_usd': 5.0},
+    })
+    usage = sl.TranscriptUsage(cache_read_input_tokens=10_000_000)  # est ≈ $15
+    assert sl.effective_session_cost(session, usage) == pytest.approx(5.0)
+
+
+
+def test_effective_session_cost_honours_real_zero() -> None:
+    # A present 0.0 is authoritative, not treated as "absent".
+    session = sl.SessionInfo.from_dict({
+        'model': {'id': 'opus', 'display_name': 'Opus 4.7'},
+        'cost': {'total_cost_usd': 0.0},
+    })
+    usage = sl.TranscriptUsage(cache_read_input_tokens=10_000_000)
+    assert sl.effective_session_cost(session, usage) == pytest.approx(0.0)
+
+
+
+def test_effective_session_cost_falls_back_when_absent() -> None:
+    # Old Claude Code payload with no 'cost' key -> total_cost_usd is None ->
+    # fall back to the token×rate estimate.
+    session = sl.SessionInfo.from_dict({
+        'model': {'id': 'claude-sonnet-4-6', 'display_name': 'Sonnet'},
+    })
+    usage = sl.TranscriptUsage(input_tokens=1_000_000, output_tokens=1_000_000)
+    assert sl.effective_session_cost(session, usage) == pytest.approx(18.0)
