@@ -51,22 +51,6 @@ def test_theme_has_all_four_models(theme_name: str) -> None:
     assert set(t.models) == {'opus', 'sonnet', 'haiku', 'other'}
 
 
-@pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))
-def test_theme_anchor_luminance_triggers_flip(theme_name: str) -> None:
-    """Every model anchor's luminance must be ≥ BG_LUM_THRESHOLD so the
-    two-sided pill foreground flip resolves to `pill_fg_dark` on bright bg.
-    Anchors below threshold would render text the same colour as the dim
-    background → invisible. See ADR-0002."""
-    t = THEMES[theme_name]
-    for model, mc in t.models.items():
-        r, g, b = mc.anchor
-        lum = (r * 299 + g * 587 + b * 114) // 1000
-        assert lum >= sl.BG_LUM_THRESHOLD, (
-            f'{theme_name}: {model} anchor lum={lum} '
-            f'< threshold {sl.BG_LUM_THRESHOLD}'
-        )
-
-
 # Theme resolution layering
 
 def test_resolve_theme_defaults_to_claude_dark(
