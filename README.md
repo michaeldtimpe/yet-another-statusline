@@ -55,9 +55,10 @@ cd ~/code/yet-another-statusline && git pull && make deploy
 
 ## The line, explained
 
-Segments are separated by ` · ` and drop right-to-left as the terminal narrows
-(lowest value first); the path truncates only as a last resort, and the model is
-pinned last.
+Segments are separated by ` · `. As the terminal narrows the **path shrinks
+first** (smart middle-ellipsis) to keep the data segments; only once the path is
+at its floor do the lowest-value segments drop (rate → cache → uptime → …). The
+model is pinned last.
 
 | Segment | Meaning |
 |---|---|
@@ -72,13 +73,26 @@ pinned last.
 | `5h N% T-H:MM` | rolling 5-hour plan quota + time to reset |
 | `7d N%` | rolling weekly plan quota |
 | `plan` | you're on a subscription (so cost is notional and not shown) |
-| `up Xh Ym (HH:MM → HH:MM)` | running time (opened → last refresh) |
+| `HH:MM → HH:MM` | session opened → last refresh (the render's clock time) |
 | `Opus 4.7 1M xhigh` | model + thinking effort (pinned last) |
 
 The git **state color** is your traffic light: green = clean & in sync,
 yellow = uncommitted changes and/or commits to push, red = behind/diverged/
 detached. The last-refresh time doubles as a freshness signal — the bar only
 re-renders on activity, so a stale time means the session has been idle.
+
+## Terminal width
+
+Claude Code runs the status line as a subprocess with no TTY and `COLUMNS` unset,
+so the usual width probes can't see your real window. On macOS the renderer falls
+back to asking iTerm2 / Terminal for the column count via AppleScript (cached ~5s,
+so it tracks resizes without spawning `osascript` on every render). To force a
+width (tmux, SSH, or any non-AppleScript terminal), write it to
+`~/.claude/terminal-width`:
+
+```bash
+echo 200 > ~/.claude/terminal-width   # overrides detection
+```
 
 ## Themes
 
