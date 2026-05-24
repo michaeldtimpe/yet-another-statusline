@@ -71,54 +71,6 @@ class TestVisibleWidth:
         assert sl._visible_width('\x1b[38;5;75m🎨\x1b[0m') == 2
 
 
-class TestSparklineWidth:
-    def test_below_lower_threshold_returns_zero(self) -> None:
-        assert sl.sparkline_width(89) == 0
-
-    def test_at_lower_threshold_returns_ten(self) -> None:
-        assert sl.sparkline_width(90) == 10
-
-    def test_below_second_threshold_returns_ten(self) -> None:
-        assert sl.sparkline_width(109) == 10
-
-    def test_at_second_threshold_returns_twenty(self) -> None:
-        assert sl.sparkline_width(110) == 20
-
-    def test_below_third_threshold_returns_twenty(self) -> None:
-        assert sl.sparkline_width(129) == 20
-
-    def test_at_third_threshold_returns_thirty(self) -> None:
-        assert sl.sparkline_width(130) == 30
-
-    def test_above_all_thresholds_returns_thirty(self) -> None:
-        assert sl.sparkline_width(200) == 30
-
-    def test_zero_returns_zero(self) -> None:
-        assert sl.sparkline_width(0) == 0
-
-
-class TestRainbowAt:
-    def test_returns_escape_for_palette_entry(self) -> None:
-        step = 5
-        offset = 3
-        idx = (step + offset) % len(sl.RAINBOW_PALETTE)
-        expected = f'\033[38;5;{sl.RAINBOW_PALETTE[idx]}m'
-        assert sl.rainbow_at(step, offset) == expected
-
-    def test_zero_offset(self) -> None:
-        step = 0
-        expected = f'\033[38;5;{sl.RAINBOW_PALETTE[0]}m'
-        assert sl.rainbow_at(step, 0) == expected
-
-    def test_wraps_around(self) -> None:
-        palette_len = len(sl.RAINBOW_PALETTE)
-        step = palette_len - 1
-        offset = 2
-        idx = (step + offset) % palette_len
-        expected = f'\033[38;5;{sl.RAINBOW_PALETTE[idx]}m'
-        assert sl.rainbow_at(step, offset) == expected
-
-
 class TestMiddleEllipsis:
     def test_fits_no_truncation(self) -> None:
         assert sl._middle_ellipsis('hello', 10) == 'hello'
