@@ -1,43 +1,115 @@
-# YAS! (Yet Another Statusline)
+# yet-another-statusline
 
-> [!IMPORTANT]
-> _The statusline requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) in order to display the icons_
+A compact, **single-line, Monaco-safe** status line for
+[Claude Code](https://claude.com/claude-code) — **no Nerd Font required**. It
+shows your working directory, git state, context usage, plan quotas, and session
+timing on one line that adapts to the terminal width.
 
-To install, run:
+```
+~/Downloads/yet-another-statusline · git main/24b6a4f ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · up 2h14m (11:00 → 13:14) · Opus 4.7 1M xhigh
+```
+
+> Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
+> rebuilt flat and borderless. The full field glossary lives in
+> [CONTEXT.md](CONTEXT.md).
+
+## Requirements
+
+- macOS or Linux
+- **Python 3.9+** — standard library only, nothing to `pip install`
+- Any monospace terminal font (Monaco, Menlo, SF Mono, …). **No Nerd Font.**
+
+## Install / deploy
 
 ```bash
-make install
+git clone https://github.com/michaeldtimpe/yet-another-statusline.git \
+  ~/code/yet-another-statusline
+cd ~/code/yet-another-statusline
+make deploy
 ```
+
+`make deploy` does everything:
+
+- symlinks the renderer into `~/.claude/`
+- registers it in `~/.claude/settings.json` (a **merge** — it won't clobber your
+  existing settings)
+- selects a theme (`llmtop` by default; `THEME=claude-dark make deploy` to pick
+  another)
+
+Then restart Claude Code (or just wait for the next render). Set your terminal
+font to any monospace you like.
+
+> **Keep the clone where you put it** — the install symlinks back to it, so don't
+> delete or move the directory.
+
+### Another MacBook
+
+Same three commands (`git clone … && cd … && make deploy`). Nothing machine-
+specific is baked in; the theme tracks each terminal's own ANSI palette.
+
+### Updating
+
+```bash
+cd ~/code/yet-another-statusline && git pull && make deploy
+```
+
+## The line, explained
+
+Segments are separated by ` · ` and drop right-to-left as the terminal narrows
+(lowest value first); the path truncates only as a last resort, and the model is
+pinned last.
+
+| Segment | Meaning |
+|---|---|
+| `~/path/to/dir` | working directory, home-relative; shown in full, truncated only on overflow |
+| `git <branch>/<commit>` | git label, **colored by state**: 🟢 clean & synced · 🟡 pending · 🔴 drift/error |
+| `+N ~N -N RN` | untracked · modified · deleted · renamed (only non-zero shown) |
+| `↑N ↓N` | commits ahead / behind the upstream |
+| `✓` | clean working tree, tracking a remote, fully synced |
+| `ctx N% used/size` | context-window occupancy — your compaction-risk gauge |
+| `cache N` | cumulative cache-read tokens this session |
+| `N/m` | token throughput per minute |
+| `5h N% T-H:MM` | rolling 5-hour plan quota + time to reset |
+| `7d N%` | rolling weekly plan quota |
+| `plan` | you're on a subscription (so cost is notional and not shown) |
+| `up Xh Ym (HH:MM → HH:MM)` | running time (opened → last refresh) |
+| `Opus 4.7 1M xhigh` | model + thinking effort (pinned last) |
+
+The git **state color** is your traffic light: green = clean & in sync,
+yellow = uncommitted changes and/or commits to push, red = behind/diverged/
+detached. The last-refresh time doubles as a freshness signal — the bar only
+re-renders on activity, so a stale time means the session has been idle.
 
 ## Themes
 
-Pick a theme in priority order: `--theme=<name>` flag → `CLAUDE_STATUSLINE_THEME`
-env var → `~/.claude/statusline-theme` file (contains just the name) → default
-(`claude-dark`).
+Selection order (first match wins): `--theme=<name>` flag →
+`CLAUDE_STATUSLINE_THEME` env var → `~/.claude/statusline-theme` file →
+default (`claude-dark`).
 
-Available: `claude-dark`, `claude-light`, `catppuccin-latte`, `catppuccin-mocha`,
-`llmtop`. The `llmtop` theme is light-background and draws from the terminal's own
-ANSI palette (indices 0–15), so it tracks your iTerm2/terminal profile colours.
-
-```bash
-echo llmtop > ~/.claude/statusline-theme   # persist a selection
-```
-
-## Demo
-
-<img width="1264" height="552" alt="statusline-demo" src="https://github.com/user-attachments/assets/64e941b8-90a4-4ec8-98e0-973a57c04212" />
-
-
-## Layout Reference
-
-<img width="1723" height="688" alt="image" src="https://github.com/user-attachments/assets/03c65cb2-f533-4194-94df-416d9b7e820e" />
-
----
-
-## Commands
-
-To demo/test:
+Available: `claude-dark`, `claude-light`, `catppuccin-latte`,
+`catppuccin-mocha`, `llmtop`. **`llmtop`** is light-background and draws from the
+terminal's own ANSI palette (indices 0–15), so it matches your iTerm2/terminal
+profile.
 
 ```bash
-make demo
+echo llmtop > ~/.claude/statusline-theme   # persist a choice
 ```
+
+## Development
+
+```bash
+uv run pytest -q          # test suite (stdlib renderer; tests use uv + pytest)
+make demo                 # animated live preview in a hermetic temp environment
+make demo/img             # write per-scenario snapshots to demo/
+```
+
+`claude/statusline_command.py` is the whole renderer (`render()` →
+`render_lines()`); `claude/statusline/themes.py` holds the themes;
+`claude/mon.py` is an optional multi-session observer (`make mon/run`). See
+[CONTEXT.md](CONTEXT.md) for the canonical field glossary and rendering notes.
+
+## Credit
+
+Forked from [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline)
+(BSD-3-Clause). This fork removes the Nerd Font glyphs, box, gradients, and
+sparkline in favor of a flat, single-line, Monaco-safe layout.

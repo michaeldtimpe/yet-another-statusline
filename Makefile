@@ -10,6 +10,18 @@ install:
 	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
 	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
 
+# One-command setup for a fresh machine: symlink, register in settings.json,
+# pick a theme. Override the theme with `THEME=claude-dark make deploy`.
+deploy: install
+	@python3 claude/register_statusline.py
+	@printf '%s\n' "$${THEME:-llmtop}" > "$(INSTALL_DIR)/statusline-theme"
+	@echo "theme       -> $${THEME:-llmtop}  ($(INSTALL_DIR)/statusline-theme)"
+	@echo ""
+	@echo "Done. Claude Code shows the statusline on its next render."
+	@echo "  - Font: any monospace works (Monaco included); no Nerd Font required."
+	@echo "  - Keep this clone in place (the install symlinks back to it)."
+	@echo "  - Themes: claude-dark | claude-light | catppuccin-latte | catppuccin-mocha | llmtop"
+
 demo:
 	@python3 claude/statusline/demo.py
 
@@ -29,4 +41,4 @@ mon/install:
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install demo demo/img mon/install mon/run
+.PHONY: install deploy demo demo/img mon/install mon/run
