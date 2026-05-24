@@ -8,20 +8,26 @@ This fork renders a single, compact, **borderless** line of ` · `-separated
 segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
-<path> ∈ <branch>/<commit> <dirty> · ctx % used/size · cache N · <rate>/m
-  · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
+<full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
+  · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
 ```
 
-Field meanings: **ctx** = current context-window occupancy (compaction risk);
-**cache** = cumulative cache-read tokens for the session; **<rate>/m** = token
-throughput per minute; **5h/7d** = rolling plan quotas with time-to-reset;
-**plan** = on a subscription (cost is notional, so not shown); **up** = how long
-the session has been running (started clock time in parens). The **model** is
-pinned last. Cost ($) and cumulative ↓in/↑out were intentionally dropped.
+Field meanings: **full-path** = the working directory, home-relative (`~/…`),
+shown in full and truncated only when the line would overflow; **git** = a
+state-coloured label (green clean+synced, yellow pending = uncommitted changes or
+commits to push, red drift/error = behind/diverged/detached) followed by
+`branch/commit` and markers — `+`untracked `~`modified `-`deleted `R`renamed
+`↑`ahead `↓`behind, and `✓` when clean, tracking, and synced; **ctx** = current
+context-window occupancy (compaction risk); **cache** = cumulative cache-read
+tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
+rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
+notional, so not shown); **up** = how long the session has been running (started
+clock time in parens). The **model** is pinned last; cost ($) and cumulative
+↓in/↑out were intentionally dropped.
 
-It is **responsive**: each segment has a drop priority; when the line exceeds the
-terminal width the lowest-value segments drop first (uptime → rate → cache →
-limits), the model stays pinned, and the location truncates as a last resort.
+It is **responsive**: low-value segments drop first (uptime → rate → cache →
+limits), keeping git/ctx/model; then the full path is truncated; the model stays
+pinned last.
 
 It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels), no
 animated/gradient colour, no sparkline, no model "pill". Every visible symbol is

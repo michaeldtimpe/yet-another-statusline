@@ -617,21 +617,27 @@ class GitInfo:
     untracked: int = 0
     deleted: int = 0
     renamed: int = 0
+    ahead: int = 0
+    behind: int = 0
+    has_upstream: bool = False
+    detached: bool = False
 
     @classmethod
     def from_cwd(cls, cwd: str) -> GitInfo:
         repo, gitdir   = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)
-        modified = untracked = deleted = renamed = 0
+        detached = branch.startswith('d:')
+        if detached:
+            branch = branch[2:]   # show the short sha as the "branch"
+        modified = untracked = deleted = renamed = ahead = behind = 0
+        has_upstream = False
         if branch:
-            modified, untracked, deleted, renamed = cls._dirty(repo)
+            (modified, untracked, deleted, renamed,
+             ahead, behind, has_upstream) = cls._status(repo)
         return cls(
-            branch    = branch,
-            commit    = commit,
-            modified  = modified,
-            untracked = untracked,
-            deleted   = deleted,
-            renamed   = renamed,
+            branch=branch, commit=commit,
+            modified=modified, untracked=untracked, deleted=deleted, renamed=renamed,
+            ahead=ahead, behind=behind, has_upstream=has_upstream, detached=detached,
         )
 
     @staticmethod
@@ -679,20 +685,30 @@ class GitInfo:
         return branch, commit
 
     @staticmethod
-    def _dirty(repo: str) -> tuple[int, int, int, int]:
-        modified = untracked = deleted = renamed = 0
+    def _status(repo: str) -> tuple[int, int, int, int, int, int, bool]:
+        modified = untracked = deleted = renamed = ahead = behind = 0
+        has_upstream = False
+        none = (modified, untracked, deleted, renamed, ahead, behind, has_upstream)
         if not repo:
-            return modified, untracked, deleted, renamed
+            return none
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'status', '--porcelain=v1', '-z',
+                ['git', '-C', repo, 'status', '--porcelain=v1', '-b', '-z',
                  '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,
             )
         except Exception:
-            return modified, untracked, deleted, renamed
+            return none
         entries = [e for e in r.stdout.split('\0') if e]
         i = 0
+        if entries and entries[0].startswith('##'):
+            header = entries[0]                 # '## main...origin/main [ahead 1, behind 2]'
+            has_upstream = '...' in header
+            m = re.search(r'ahead (\d+)', header)
+            ahead = int(m.group(1)) if m else 0
+            m = re.search(r'behind (\d+)', header)
+            behind = int(m.group(1)) if m else 0
+            i = 1
         while i < len(entries):
             entry = entries[i]
             if len(entry) < 2:
@@ -712,7 +728,7 @@ class GitInfo:
             elif x == 'M' or y == 'M':
                 modified += 1
             i += 1
-        return modified, untracked, deleted, renamed
+        return modified, untracked, deleted, renamed, ahead, behind, has_upstream
 
 
 @dataclass
@@ -937,13 +953,17 @@ def _session_start(transcript_path: str) -> float | None:
 
 
 def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
-    """Single borderless line of ` · `-separated segments. Each segment carries a
-    drop priority; when the line exceeds `width` the highest-priority segments are
-    dropped (wherever they sit) and the location is truncated as a last resort.
-    Visual order is fixed and the model is pinned last.
+    """Single borderless line of ` · `-separated segments. Low-value segments drop
+    first when the line exceeds `width`; the full path is truncated only after that
+    (keeping git/ctx/model); the model is pinned last.
 
-        <path> ∈ <branch>/<commit> <dirty> · ctx % used/size · ↓in ↑out · cache N
-          · <rate>/m · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
+        <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
+          · ctx % used/size · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan
+          · up <elapsed> (<start>) · <model> <effort>
+
+    The `git` label is coloured by state: green clean+synced, yellow pending
+    (uncommitted changes or commits to push), red drift/error (behind, diverged,
+    or detached HEAD). `✓` shows when the branch is clean, tracking, and synced.
     """
     SEP   = f' {r.LABEL}·{r.R} '
     ctx   = session.context_window
@@ -957,19 +977,35 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
 
-    # location (pinned first; truncated last)
-    loc = f'{r.PWD}{session.short_pwd}{r.R}'
+    # full home-relative path (elastic: shown in full, truncated only if needed)
+    home = os.path.expanduser('~')
+    cwd  = session.cwd or ''
+    full = ('~' + cwd[len(home):]) if home and cwd.startswith(home) else (cwd or session.short_pwd)
+    path_full = f'{r.PWD}{full}{r.R}'
+
+    # git segment: state-coloured `git` label + branch/commit + markers
+    git_seg = None
     if git.branch:
-        loc += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
+        if git.detached or git.behind > 0:
+            st = r.alert                                       # red: error / drift
+        elif git.untracked or git.modified or git.deleted or git.renamed or git.ahead:
+            st = r.warn                                        # yellow: pending
+        else:
+            st = r.safe                                        # green: clean & synced
+        g = f'{st}git{r.R} {r.BRANCH}{git.branch}{r.R}'
         if git.commit:
-            loc += f'{r.COMMIT}/{git.commit}{r.R}'
-        dirty = ''
-        if git.untracked: dirty += f'{r.DIRTY}•{git.untracked}{r.R}'
-        if git.modified:  dirty += f'{r.DIRTY}*{git.modified}{r.R}'
-        if git.deleted:   dirty += f'{r.DIRTY}-{git.deleted}{r.R}'
-        if git.renamed:   dirty += f'{r.DIRTY}R{git.renamed}{r.R}'
-        if dirty:
-            loc += ' ' + dirty
+            g += f'{r.COMMIT}/{git.commit}{r.R}'
+        if git.untracked: g += f' {r.DIRTY}+{git.untracked}{r.R}'
+        if git.modified:  g += f' {r.DIRTY}~{git.modified}{r.R}'
+        if git.deleted:   g += f' {r.DIRTY}-{git.deleted}{r.R}'
+        if git.renamed:   g += f' {r.DIRTY}R{git.renamed}{r.R}'
+        if git.ahead:     g += f' {r.warn}↑{git.ahead}{r.R}'
+        if git.behind:    g += f' {r.alert}↓{git.behind}{r.R}'
+        clean = not (git.untracked or git.modified or git.deleted
+                     or git.renamed or git.ahead or git.behind)
+        if clean and git.has_upstream and not git.detached:
+            g += f' {r.safe}✓{r.R}'
+        git_seg = g
 
     model = f'{r.model_colour(session.model_name)}{session.model_name}{r.R}'
     if session.model_thinking:
@@ -982,35 +1018,49 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     cache_seg = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
     rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
 
-    # (text, drop_priority): higher drops first; 0 = pinned (truncated, not dropped)
-    segs: list[tuple[str, int]] = [
-        (loc, 0), (ctx_seg, 1), (cache_seg, 6), (rate_seg, 7),
-    ]
+    # Segments after the path, each (text, drop_priority). Priorities 1–3 are kept
+    # (path truncates instead); ≥4 are dropped first (trivia/limits).
+    segs: list[tuple[str, int]] = []
+    if git_seg:
+        segs.append((git_seg, 1))
+    segs.append((ctx_seg, 2))
+    segs.append((cache_seg, 7))
+    segs.append((rate_seg, 8))
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
         reset    = _fmt_reset(five.resets_at)
         five_seg = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
         if reset:
             five_seg += f' {r.COMMIT}{reset}{r.R}'
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
-        segs += [(five_seg, 3), (seven_seg, 4), (f'{r.LABEL}plan{r.R}', 5)]
-
+        segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
     start = _session_start(session.transcript_path)
     if start:
         started = datetime.fromtimestamp(start).strftime('%H:%M')
         elapsed = fmt_dur(max(0.0, time.time() - start))
-        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} {r.LABEL}({started}){r.R}', 8))
+        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} {r.LABEL}({started}){r.R}', 9))
+    segs.append((model, 3))   # pinned visually last
 
-    segs.append((model, 2))   # pinned visually last; kept over limits/trivia when narrow
+    # ---- responsive fit ----
+    def line_w(path: str, ss: list) -> int:
+        return _visible_width(SEP.join([path] + [t for t, _ in ss]))
 
-    # responsive: drop the highest-priority segment until the line fits
-    def line_w(ss: list) -> int:
-        return _visible_width(SEP.join(t for t, _ in ss))
-    while len(segs) > 1 and line_w(segs) > width:
-        i = max(range(len(segs)), key=lambda j: segs[j][1])
-        if segs[i][1] == 0:
+    # 1) drop low-value segments (prio ≥ 4) while keeping the full path
+    while line_w(path_full, segs) > width:
+        cand = [(p, i) for i, (_, p) in enumerate(segs) if p >= 4]
+        if not cand:
             break
-        segs.pop(i)
-    line = SEP.join(t for t, _ in segs)
+        segs.pop(max(cand)[1])
+
+    # 2) truncate the path (keeping git / ctx / model) to fit
+    path_disp = path_full
+    if line_w(path_disp, segs) > width:
+        rest = _visible_width(SEP.join(t for t, _ in segs)) + _visible_width(SEP)
+        path_disp = _middle_ellipsis(path_full, max(3, width - rest))
+
+    # 3) extreme narrow: drop remaining segments, then a final safety clip
+    while segs and line_w(path_disp, segs) > width:
+        segs.pop(max(range(len(segs)), key=lambda j: segs[j][1]))
+    line = SEP.join([path_disp] + [t for t, _ in segs])
     if _visible_width(line) > width:
         line = _middle_ellipsis(line, width)
     return [line]
