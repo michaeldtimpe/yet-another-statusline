@@ -9,7 +9,7 @@ segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
 <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
-  · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan · up <elapsed> (<start>) · <model> <effort>
+  · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan · <opened> → <last-refresh> · <model> <effort>
 ```
 
 Field meanings: **full-path** = the working directory, home-relative (`~/…`),
@@ -21,13 +21,17 @@ commits to push, red drift/error = behind/diverged/detached) followed by
 context-window occupancy (compaction risk); **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
-notional, so not shown); **up** = how long the session has been running (started
-clock time in parens). The **model** is pinned last; cost ($) and cumulative
-↓in/↑out were intentionally dropped.
+notional, so not shown); **`<opened> → <last-refresh>`** = the clock time the
+session began and the clock time of the current render (a freshness signal). The
+**model** is pinned last; cost ($) and cumulative ↓in/↑out were intentionally
+dropped.
 
-It is **responsive**: low-value segments drop first (uptime → rate → cache →
-limits), keeping git/ctx/model; then the full path is truncated; the model stays
-pinned last.
+It is **responsive**: the **path shrinks first** (smart middle-ellipsis) to keep
+the data segments; only when the path hits its floor do the lowest-value segments
+drop (rate → cache → uptime → limits); the model stays pinned last. Terminal
+width: Claude Code provides no TTY/`COLUMNS`, so width falls back to an
+AppleScript query of iTerm2/Terminal (cached ~5s in `~/.claude/.statusline-width`);
+`~/.claude/terminal-width` forces a value.
 
 It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels), no
 animated/gradient colour, no sparkline, no model "pill". Every visible symbol is

@@ -39,5 +39,16 @@ def test_render_shows_uptime_when_started(monkeypatch, tmp_path: Path) -> None:
                            'context_window_size': 200000},
     }
     out = ANSI.sub('', sl.render(info, 200))
-    assert 'up ' in out          # uptime segment present
+    assert '→' in out            # opened → last-refresh timestamp present
     assert out.rstrip().endswith('Opus 4.7')  # model pinned last
+
+
+def test_osascript_width_uses_fresh_cache(monkeypatch, tmp_path) -> None:
+    # A freshly-written cache file is returned without spawning osascript, so the
+    # width detector is fast on the common path.
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    (tmp_path / '.claude' / '.statusline-width').write_text('214')
+    monkeypatch.setattr(sl.subprocess, 'run',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('osascript spawned')))
+    assert sl._osascript_width() == 214

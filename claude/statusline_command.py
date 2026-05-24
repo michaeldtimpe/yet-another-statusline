@@ -74,7 +74,44 @@ def terminal_width() -> int:
             os.close(tty_fd)
     except OSError:
         pass
-    return MAX_WIDTH
+    return _osascript_width() or MAX_WIDTH
+
+
+def _osascript_width() -> int:
+    """macOS fallback: ask the frontmost terminal app for its column count via
+    AppleScript, cached briefly so osascript isn't spawned on every render.
+
+    Claude Code runs the status line as a subprocess with no controlling TTY and
+    COLUMNS unset, so every detector above fails — without this the bar would be
+    stuck at the MAX_WIDTH fallback no matter how wide the real window is.
+    """
+    cache = HOME / '.claude' / '.statusline-width'
+    stale: int | None = None
+    try:
+        val = int(cache.read_text().strip())
+        if time.time() - cache.stat().st_mtime < 5.0:
+            return val           # fresh cache — skip osascript
+        stale = val              # keep as a fallback if osascript fails
+    except (OSError, ValueError):
+        pass
+    if sys.platform == 'darwin':
+        for script in (
+            'tell application "iTerm2" to tell current session of current window to get columns',
+            'tell application "Terminal" to get number of columns of front window',
+        ):
+            try:
+                out = subprocess.run(['osascript', '-e', script],
+                                     capture_output=True, text=True, timeout=1)
+                w = int(out.stdout.strip())
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
+            if w > 0:
+                try:
+                    cache.write_text(str(w))
+                except OSError:
+                    pass
+                return w
+    return stale or 0
 
 RESET  = '\033[0m'
 BOLD   = '\033[1m'
@@ -1024,8 +1061,8 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     if git_seg:
         segs.append((git_seg, 1))
     segs.append((ctx_seg, 2))
-    segs.append((cache_seg, 7))
-    segs.append((rate_seg, 8))
+    segs.append((cache_seg, 8))
+    segs.append((rate_seg, 9))
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
         reset    = _fmt_reset(five.resets_at)
         five_seg = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
@@ -1037,35 +1074,36 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     start   = _session_start(session.transcript_path)
     if start:
         started = datetime.fromtimestamp(start).strftime('%H:%M')
-        elapsed = fmt_dur(max(0.0, time.time() - start))
-        segs.append((f'{r.LABEL}up {r.R}{r.white_brt}{elapsed}{r.R} '
-                     f'{r.LABEL}({started} → {now_str}){r.R}', 9))   # opened → last refresh
+        segs.append((f'{r.white_brt}{started}{r.R} {r.LABEL}→{r.R} '
+                     f'{r.white_brt}{now_str}{r.R}', 7))   # opened → last refresh
     else:
-        segs.append((f'{r.LABEL}refreshed {r.R}{r.white_brt}{now_str}{r.R}', 9))
+        segs.append((f'{r.white_brt}{now_str}{r.R}', 7))
     segs.append((model, 3))   # pinned visually last
 
     # ---- responsive fit ----
-    def line_w(path: str, ss: list) -> int:
-        return _visible_width(SEP.join([path] + [t for t, _ in ss]))
+    # The path is the primary elastic: it shrinks (smart middle-ellipsis) to free
+    # space and KEEP segments. Segments are only dropped (lowest value first) once
+    # the path is already at its floor and the line still overflows.
+    PATH_FLOOR = 14
+    full_pw = _visible_width(path_full)
 
-    # 1) drop low-value segments (prio ≥ 4) while keeping the full path
-    while line_w(path_full, segs) > width:
-        cand = [(p, i) for i, (_, p) in enumerate(segs) if p >= 4]
+    def seg_block(ss: list) -> int:
+        # width of the segments + the separator that joins them to the path
+        return _visible_width(SEP.join(t for t, _ in ss)) + (_visible_width(SEP) if ss else 0)
+
+    while True:
+        budget = width - seg_block(segs)
+        if budget >= full_pw or budget >= PATH_FLOOR:
+            break                       # path fits in full, or can show >= floor
+        cand = [(p, i) for i, (_, p) in enumerate(segs) if p >= 1]
         if not cand:
             break
-        segs.pop(max(cand)[1])
+        segs.pop(max(cand)[1])          # drop the lowest-value segment, freeing path room
 
-    # 2) truncate the path (keeping git / ctx / model) to fit
-    path_disp = path_full
-    if line_w(path_disp, segs) > width:
-        rest = _visible_width(SEP.join(t for t, _ in segs)) + _visible_width(SEP)
-        path_disp = _middle_ellipsis(path_full, max(3, width - rest))
-
-    # 3) extreme narrow: drop remaining segments, then a final safety clip
-    while segs and line_w(path_disp, segs) > width:
-        segs.pop(max(range(len(segs)), key=lambda j: segs[j][1]))
+    budget    = width - seg_block(segs)
+    path_disp = path_full if full_pw <= budget else _middle_ellipsis(path_full, max(3, budget))
     line = SEP.join([path_disp] + [t for t, _ in segs])
-    if _visible_width(line) > width:
+    if _visible_width(line) > width:    # final safety
         line = _middle_ellipsis(line, width)
     return [line]
 
