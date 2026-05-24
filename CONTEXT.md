@@ -4,15 +4,22 @@ Personal Claude Code configuration and a custom statusline that renders session 
 
 ## Rendering (personal fork)
 
-This fork renders **flat and Monaco-safe**: no Nerd Font glyphs (sections use
-terse text labels — `5h`, `7d`, `skills`, `plugins`, `t/m`, `$`), no animated
-rainbow border (single static colour), no gradient/sparkline (the context bar is
-a solid zone colour and the token rate is a plain number), and no model "pill"
-(the model + effort render as plain text). Every visible symbol is a named
-constant and stays within standard Unicode (box-drawing, block elements, `↓↑`),
-so a plain non-Nerd font renders it without tofu. The **Session ID** is its own
-left-most field (`sess <id8>`), not woven into the top border. See the
-Monaco-safety regression test in `test/test_monaco_safe.py`.
+This fork renders a compact **3-line, borderless** layout built by
+`render_lines()` (no box frame, no wasted space):
+
+```
+<path>  ∈ <branch>/<commit> <dirty>   ·   <model> <effort>
+ctx <pct>% (<used>/<size>, comp <pct>%)  ·  ↓<in> ↑<out>  ·  cache <N>  ·  <rate> t/m
+$<session>  ·  ~$<day>  ·  5h <pct>% T-<reset>  ·  7d <pct>%  ·  plan
+```
+
+It is **flat and Monaco-safe**: no Nerd Font glyphs (terse text labels — `5h`,
+`7d`, `t/m`, `$`, `cache`), no animated/gradient colour, no sparkline, no model
+"pill". Every visible symbol stays within standard Unicode (`∈ · ↓ ↑ • * -`), so
+a plain non-Nerd font renders it without tofu (see `test/test_monaco_safe.py`).
+The session id, skills/plugins, and the old box/pill/sparkline machinery were
+dropped from the rendered output; the legacy `build_wide`/border/gradient code
+still exists in the module but is no longer reached by `render()`.
 
 ## Language
 

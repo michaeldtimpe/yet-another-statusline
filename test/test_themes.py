@@ -161,15 +161,8 @@ def frozen(monkeypatch: pytest.MonkeyPatch, tmp_path):  # type: ignore[no-untype
 
 
 def _render(width: int, theme: Theme) -> str:
-    session = sl.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    r       = sl.Renderer(bg_shift='warm', theme=theme)
-    if width < sl.NARROW_WIDTH:
-        spec = sl.build_narrow(session, width, r)
-    elif width < sl.MEDIUM_WIDTH:
-        spec = sl.build_medium(session, width, r)
-    else:
-        spec = sl.build_wide(session, width, r)
-    return '\n'.join(sl.render_layout(spec, r))
+    # Pins the real public render() output (the compact 3-line layout).
+    return sl.render(json.loads(SESSION.read_text()), width, bg_shift='warm', theme=theme)
 
 
 @pytest.mark.parametrize('layout,width', [

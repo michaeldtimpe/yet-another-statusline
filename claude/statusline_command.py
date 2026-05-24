@@ -2324,18 +2324,84 @@ def resolve_theme(cli_name: str | None) -> Theme:
     return CLAUDE_DARK
 
 
+def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
+    """The compact 3-line, borderless layout.
+
+    Line 1: path  ∈ branch/commit dirty  ·  model effort
+    Line 2: ctx %  (used/size, comp %)   ·  ↓in ↑out  ·  cache N  ·  rate t/m
+    Line 3: $session  ·  ~$day  ·  5h % T-…  ·  7d %  ·  plan
+    """
+    SEP = f'  {r.LABEL}·{r.R}  '
+    ctx   = session.context_window
+    total = ctx.total_input_tokens + ctx.total_output_tokens
+    size  = ctx.context_window_size or 0
+
+    git       = GitInfo.from_cwd(session.cwd)
+    usage     = TranscriptUsage.from_transcript(session.transcript_path)
+    today     = datetime.now().strftime('%Y-%m-%d')
+    token_log = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
+    tok_rate  = TokenRate.update(session.session_id, usage.billed_in, usage.out)
+    sess_cost = effective_session_cost(session, usage)
+    day_cost  = compute_day_cost(session.model, token_log)
+    rl        = session.rate_limits
+
+    # line 1 — location + model
+    line1 = f'{r.PWD}{session.short_pwd}{r.R}'
+    if git.branch:
+        line1 += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
+        if git.commit:
+            line1 += f'{r.COMMIT}/{git.commit}{r.R}'
+        dirty = ''
+        if git.untracked: dirty += f'{r.DIRTY}•{git.untracked}{r.R}'
+        if git.modified:  dirty += f'{r.DIRTY}*{git.modified}{r.R}'
+        if git.deleted:   dirty += f'{r.DIRTY}-{git.deleted}{r.R}'
+        if git.renamed:   dirty += f'{r.DIRTY}R{git.renamed}{r.R}'
+        if dirty:
+            line1 += ' ' + dirty
+    model = f'{r.model_colour(session.model_name)}{session.model_name}{r.R}'
+    if session.model_thinking:
+        model += f' {r.MODEL}{ITALIC}{session.model_thinking}{r.R}'
+    line1 += SEP + model
+
+    # line 2 — context + tokens + rate
+    ctx_pct   = (total / size * 100) if size else 0.0
+    comp_raw  = total / SOFT_LIMIT * 100
+    ctx_clr   = r.fill_colour(comp_raw)
+    ctx_field = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
+                 f'{r.LABEL}({r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}, comp '
+                 f'{ctx_clr}{min(comp_raw, 100):.0f}%{r.LABEL}){r.R}')
+    tok_field   = (f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
+                   f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
+    cache_field = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
+    rate_field  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL} t/m{r.R}'
+    line2 = SEP.join([ctx_field, tok_field, cache_field, rate_field])
+
+    # line 3 — cost + limits
+    day_clr    = r.day_cost_colour(day_cost)
+    fields3    = [
+        f'{r.COST}${sess_cost:,.2f}{r.R}{r.LABEL} session{r.R}',
+        f'{r.LABEL}~{day_clr}${day_cost:,.2f}{r.R}{r.LABEL} day{r.R}',
+        f'{r.LABEL}5h {r.R}{r.helper(rl.five_hour)}',
+    ]
+    seven = rl.seven_day
+    if seven.used_percentage or seven.resets_at:
+        seven_clr = r.fill_colour(float(seven.used_percentage or 0))
+        fields3.append(f'{r.LABEL}7d {seven_clr}{seven.used_percentage}%{r.R}')
+    five = rl.five_hour
+    if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
+        fields3.append(f'{r.LABEL}plan{r.R}')
+    line3 = SEP.join(fields3)
+
+    return [ln if _visible_width(ln) <= width else _middle_ellipsis(ln, width)
+            for ln in (line1, line2, line3)]
+
+
 def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
     if width < MIN_WIDTH:
         return ''
     session = SessionInfo.from_dict(session_info)
     r       = Renderer(bg_shift=bg_shift, theme=theme)
-    if width < NARROW_WIDTH:
-        spec = build_narrow(session, width, r)
-    elif width < MEDIUM_WIDTH:
-        spec = build_medium(session, width, r)
-    else:
-        spec = build_wide(session, width, r)
-    return '\n'.join(render_layout(spec, r))
+    return '\n'.join(render_lines(session, width, r))
 
 
 def prune_output_dir(out_dir: Path, keep: int = 50) -> None:
