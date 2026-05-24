@@ -461,11 +461,73 @@ CATPPUCCIN_MOCHA = Theme(
 )
 
 
+# ── llmtop ──────────────────────────────────────────────────────────────────
+# Light-background theme that mirrors `llmtop`'s utilitarian palette by drawing
+# every VISIBLE slot from the terminal's own ANSI colours (indices 0-15) via
+# fg256 — so it tracks the user's iTerm2 profile instead of hard-coding RGB.
+# Role map matches llmtop: border/label=DarkGray(8), accent/path=Cyan(6),
+# highlight=Yellow(3), ok/warn/alert=Green(2)/Yellow(3)/Red(1), values=black(0)
+# (readable on a light bg — NOT White(15), which would vanish).
+# The RGB gradient/pill fields are required by the dataclass but inert under the
+# flattened renderer (no gradient bar / sparkline / pill); kept light-bg-safe.
+LLMTOP = Theme(
+    name        = 'llmtop',
+
+    border      = fg256(8),
+    border_off  = fg256(7),
+    pwd         = fg256(6),
+    branch      = fg256(2),
+    commit      = fg256(8),
+    session     = fg256(8),
+    skills      = fg256(3),
+    time        = fg256(8),
+    tok         = fg256(6),
+    tok_dim     = fg256(8),
+    tok_day     = fg256(4),
+    tok_day_dim = fg256(8),
+    cost        = fg256(5),
+    bar_fill    = fg256(2),
+    bar_empty   = fg256(7),
+    dim_green   = fg256(2),
+    label       = fg256(8),
+    ctx         = fg256(6),
+    white_brt   = fg256(0),
+    arrow       = fg256(2),
+    dirty       = fg256(1),
+    icon_path   = fg256(6),
+    tok_icon    = fg256(3),
+    model       = fg256(5),
+
+    safe        = fg256(2),
+    warn        = fg256(3),
+    alert       = fg256(1),
+    yellow      = fg256(3),
+    tok_arrow   = fg256(3),
+
+    models = {
+        'opus':   ModelColors(anchor=(199, 196,   0), warm_shift=(199, 196,   0), cool_shift=(  0, 194,   0), label=fg256(3)),
+        'sonnet': ModelColors(anchor=(  0, 194,   0), warm_shift=(  0, 194,   0), cool_shift=(  0, 197, 199), label=fg256(2)),
+        'haiku':  ModelColors(anchor=(167, 171, 242), warm_shift=( 96, 253, 255), cool_shift=(167, 171, 242), label=fg256(4)),
+        'other':  ModelColors(anchor=(192,  64, 190), warm_shift=(192,  64, 190), cool_shift=( 39,  68, 199), label=fg256(5)),
+    },
+
+    pill_fg_dark  = ( 10,  10,  10),
+    pill_fg_light = (245, 245, 245),
+
+    grad_stops      = CLAUDE_LIGHT.grad_stops,
+    grey_rgb        = (160, 160, 160),
+    spark_stops     = CLAUDE_LIGHT.spark_stops,
+    spec_gradients  = CLAUDE_LIGHT.spec_gradients,
+    spec_empty_ansi = fg256(7),
+)
+
+
 THEMES: dict[str, Theme] = {
     CLAUDE_DARK.name:      CLAUDE_DARK,
     CLAUDE_LIGHT.name:     CLAUDE_LIGHT,
     CATPPUCCIN_LATTE.name: CATPPUCCIN_LATTE,
     CATPPUCCIN_MOCHA.name: CATPPUCCIN_MOCHA,
+    LLMTOP.name:           LLMTOP,
 }
 
 
