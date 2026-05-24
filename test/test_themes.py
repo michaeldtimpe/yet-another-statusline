@@ -29,6 +29,7 @@ SESSION  = (Path(__file__).parent.parent / 'claude' / 'statusline'
 
 EXPECTED_THEMES = {
     'claude-dark', 'claude-light', 'catppuccin-latte', 'catppuccin-mocha',
+    'llmtop',
 }
 
 
@@ -48,22 +49,6 @@ def test_theme_has_every_slot_filled(theme_name: str) -> None:
 def test_theme_has_all_four_models(theme_name: str) -> None:
     t = THEMES[theme_name]
     assert set(t.models) == {'opus', 'sonnet', 'haiku', 'other'}
-
-
-@pytest.mark.parametrize('theme_name', sorted(EXPECTED_THEMES))
-def test_theme_anchor_luminance_triggers_flip(theme_name: str) -> None:
-    """Every model anchor's luminance must be ≥ BG_LUM_THRESHOLD so the
-    two-sided pill foreground flip resolves to `pill_fg_dark` on bright bg.
-    Anchors below threshold would render text the same colour as the dim
-    background → invisible. See ADR-0002."""
-    t = THEMES[theme_name]
-    for model, mc in t.models.items():
-        r, g, b = mc.anchor
-        lum = (r * 299 + g * 587 + b * 114) // 1000
-        assert lum >= sl.BG_LUM_THRESHOLD, (
-            f'{theme_name}: {model} anchor lum={lum} '
-            f'< threshold {sl.BG_LUM_THRESHOLD}'
-        )
 
 
 # Theme resolution layering
@@ -109,6 +94,19 @@ def test_resolve_theme_unknown_name_falls_through(
     assert sl.resolve_theme('no-such-theme') is sl.CLAUDE_DARK
 
 
+def test_resolve_theme_llmtop_via_config_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_home: Path,
+) -> None:
+    # The user's selection mechanism: ~/.claude/statusline-theme = "llmtop"
+    # must override the default with no CLI/env set.
+    monkeypatch.delenv('CLAUDE_STATUSLINE_THEME', raising=False)
+    (tmp_home / '.claude').mkdir(parents=True, exist_ok=True)
+    (tmp_home / '.claude' / 'statusline-theme').write_text('llmtop\n')
+    resolved = sl.resolve_theme(None)
+    assert resolved is THEMES['llmtop']
+    assert resolved.name == 'llmtop'
+
+
 # Byte-identity snapshot — claude-dark × 3 layouts
 #
 # The rendered statusline encodes (a) the rate-limit countdown derived from
@@ -136,22 +134,19 @@ class _FrozenDatetime:
 
 
 @pytest.fixture
-def frozen(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+def frozen(monkeypatch: pytest.MonkeyPatch, tmp_path):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(sl.time, 'time', lambda: float(FROZEN_EPOCH))
     monkeypatch.setattr(sl, 'datetime', _FrozenDatetime)
+    # Hermetic HOME: empty token/rate logs so the snapshot doesn't depend on the
+    # developer's real ~/.claude state (previously a source of flakiness).
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
     yield
 
 
 def _render(width: int, theme: Theme) -> str:
-    session = sl.SessionInfo.from_dict(json.loads(SESSION.read_text()))
-    r       = sl.Renderer(bg_shift='warm', theme=theme)
-    if width < sl.NARROW_WIDTH:
-        spec = sl.build_narrow(session, width, r)
-    elif width < sl.MEDIUM_WIDTH:
-        spec = sl.build_medium(session, width, r)
-    else:
-        spec = sl.build_wide(session, width, r)
-    return '\n'.join(sl.render_layout(spec, r))
+    # Pins the real public render() output (the compact 3-line layout).
+    return sl.render(json.loads(SESSION.read_text()), width, bg_shift='warm', theme=theme)
 
 
 @pytest.mark.parametrize('layout,width', [

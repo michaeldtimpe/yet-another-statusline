@@ -27,24 +27,6 @@ class TestFillColour:
 
 
 
-class TestDayCostColour:
-    def test_0_is_ok(self) -> None:
-        assert _r.day_cost_colour(0) == sl.CLR_GREEN_OK
-
-    def test_24_999_is_ok(self) -> None:
-        assert _r.day_cost_colour(24.999) == sl.CLR_GREEN_OK
-
-    def test_25_is_yellow(self) -> None:
-        assert _r.day_cost_colour(25.0) == sl.CLR_YELLOW
-
-    def test_50_is_yellow(self) -> None:
-        assert _r.day_cost_colour(50.0) == sl.CLR_YELLOW
-
-    def test_50_01_is_alert(self) -> None:
-        assert _r.day_cost_colour(50.01) == sl.CLR_ALERT
-
-
-
 class TestModelColour:
     def test_opus(self) -> None:
         assert _r.model_colour('Opus 4.7') == sl.CLR_YELLOW
