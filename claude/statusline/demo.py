@@ -49,6 +49,35 @@ SUBAGENTS_PROGRESSION = (
     None,
 )
 
+# (subject, activeForm) for the TaskList progression row.
+DEMO_TASKS = (
+    ('Audit gradient palette', 'Auditing gradient palette'),
+    ('Wire alert-mode pill',   'Wiring alert-mode pill'),
+    ('Refactor border math',   'Refactoring border math'),
+    ('Update CONTEXT.md',      'Updating CONTEXT.md'),
+)
+
+# pct below which no TaskList is shown (lets the demo open without it).
+TASKS_START_PCT = 0.15
+
+
+def task_state_for(pct: float) -> list[tuple[str, str, str]]:
+    if pct < TASKS_START_PCT:
+        return []
+    n = len(DEMO_TASKS)
+    progress = (pct - TASKS_START_PCT) / (1.0 - TASKS_START_PCT)
+    active = min(int(progress * n), n - 1)
+    out: list[tuple[str, str, str]] = []
+    for i, (subj, af) in enumerate(DEMO_TASKS):
+        if pct >= 1.0 or i < active:
+            status = 'completed'
+        elif i == active:
+            status = 'in_progress'
+        else:
+            status = 'pending'
+        out.append((subj, af, status))
+    return out
+
 
 def build_synthetic_env(tmpdir: Path, session_id: str) -> None:
     claude = tmpdir / '.claude'
@@ -125,7 +154,15 @@ def write_settings(claude_dir: Path, plugins: list[str]) -> None:
     (claude_dir / 'settings.json').write_text(json.dumps(settings, indent=2) + '\n')
 
 
-def write_transcript(transcript: Path, skills: list[str], total_in: int, total_cc: int, total_cr: int, total_out: int) -> None:
+def write_transcript(
+    transcript: Path,
+    skills: list[str],
+    total_in: int,
+    total_cc: int,
+    total_cr: int,
+    total_out: int,
+    tasks: list[tuple[str, str, str]] | None = None,
+) -> None:
     msgs = []
     n = max(1, len(skills))
     for i, skill in enumerate(skills or ['']):
@@ -147,6 +184,43 @@ def write_transcript(transcript: Path, skills: list[str], total_in: int, total_c
         if skill:
             msg['content'] = [{'type': 'tool_use', 'name': 'Skill', 'input': {'skill': skill}}]
         msgs.append({'type': 'assistant', 'message': msg})
+    if tasks:
+        ts_now = datetime.now().astimezone().isoformat()
+        msgs.append({
+            'type': 'assistant',
+            'timestamp': ts_now,
+            'message': {
+                'id': 'msg_task_create',
+                'role': 'assistant',
+                'content': [
+                    {
+                        'type': 'tool_use',
+                        'name': 'TaskCreate',
+                        'input': {'subject': subj, 'activeForm': af},
+                    }
+                    for subj, af, _ in tasks
+                ],
+            },
+        })
+        updates = [
+            {
+                'type': 'tool_use',
+                'name': 'TaskUpdate',
+                'input': {'taskId': str(i + 1), 'status': status, 'activeForm': af},
+            }
+            for i, (_, af, status) in enumerate(tasks)
+            if status != 'pending'
+        ]
+        if updates:
+            msgs.append({
+                'type': 'assistant',
+                'timestamp': ts_now,
+                'message': {
+                    'id': 'msg_task_update',
+                    'role': 'assistant',
+                    'content': updates,
+                },
+            })
     transcript.write_text('\n'.join(json.dumps(m) for m in msgs) + '\n')
 
 
@@ -209,7 +283,7 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
     for i in range(steps + 1):
         pct = i / steps
 
-        total_in   = int(150_000 * pct * 1.05)
+        total_in   = int(150_000 * pct * 1.25)
         total_cc   = int(total_in * 0.18)
         total_cr   = int(total_in * 12.0)
         total_out  = int(7_500 * pct + 120)
@@ -227,7 +301,8 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
             + ''.join(f'- [ ] task {n}\n' for n in range(spec_done + 1, spec_total + 1))
         )
 
-        write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out)
+        tasks_now = task_state_for(pct)
+        write_transcript(transcript_p, skills_now, total_in, total_cc, total_cr, total_out, tasks=tasks_now)
         write_settings(claude, plugins_now)
         write_subagents(claude, session_id, project, subagent_now)
 
@@ -248,6 +323,7 @@ def animate(env: dict, raw: dict, tmpdir: Path, session_id: str, steps: int = DE
         out = render_once(env, json.dumps(raw))
         if last_lines > 1:
             sys.stdout.write(f'\033[{last_lines - 1}A\r')
+        sys.stdout.write('\033[J')
         sys.stdout.write(out)
         sys.stdout.flush()
         last_lines = out.count('\n') + 1
