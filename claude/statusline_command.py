@@ -2336,30 +2336,27 @@ def _fmt_reset(resets_at: float) -> str:
 
 
 def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
-    """Compact 2-line, column-aligned, borderless layout. Each column stacks a
-    primary field (line 1) over its detail (line 2); columns line up vertically.
-    Responsive: right-most columns are dropped, then the location column is
-    truncated, to fit the terminal width.
+    """Single borderless line of ` · `-separated segments. Responsive: segments
+    are dropped right-to-left when the terminal is too narrow, and the location
+    segment is truncated as a last resort. Priority (kept longest, left → right):
+    location, model, context, tokens, cache, rate, 5h, 7d, plan.
 
-        <path> ∈ <branch>/<commit> <dirty>   ctx % · ↓in ↑out    $sess session       5h % T-H:MM
-        <model> <effort>                     used/size · cache   ~$day · <rate>/m     7d % · plan
+        <path> ∈ <branch>/<commit> <dirty> · <model> <effort> · ctx % <used>/<size>
+          · ↓in ↑out · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan
     """
-    INSEP = f' {r.LABEL}·{r.R} '
-    GAP   = 3
+    SEP   = f' {r.LABEL}·{r.R} '
     ctx   = session.context_window
     total = ctx.total_input_tokens + ctx.total_output_tokens
     size  = ctx.context_window_size or 0
 
-    git       = GitInfo.from_cwd(session.cwd)
-    usage     = TranscriptUsage.from_transcript(session.transcript_path)
-    today     = datetime.now().strftime('%Y-%m-%d')
-    token_log = TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
-    tok_rate  = TokenRate.update(session.session_id, usage.billed_in, usage.out)
-    sess_cost = effective_session_cost(session, usage)
-    day_cost  = compute_day_cost(session.model, token_log)
+    git   = GitInfo.from_cwd(session.cwd)
+    usage = TranscriptUsage.from_transcript(session.transcript_path)
+    today = datetime.now().strftime('%Y-%m-%d')
+    TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
+    tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
 
-    # column 1 — location over model/effort
+    # location (always present; truncated last)
     loc = f'{r.PWD}{session.short_pwd}{r.R}'
     if git.branch:
         loc += f' {r.LABEL}∈{r.R} {r.BRANCH}{git.branch}{r.R}'
@@ -2372,56 +2369,37 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
         if git.renamed:   dirty += f'{r.DIRTY}R{git.renamed}{r.R}'
         if dirty:
             loc += ' ' + dirty
+
     model = f'{r.model_colour(session.model_name)}{session.model_name}{r.R}'
     if session.model_thinking:
         model += f' {r.MODEL}{ITALIC}{session.model_thinking}{r.R}'
 
-    # column 2 — usage: ctx% + io  over  used/size + cache
-    ctx_pct  = (total / size * 100) if size else 0.0
-    ctx_clr  = r.fill_colour(total / SOFT_LIMIT * 100)
-    usage_l1 = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R}{INSEP}'
-                f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
-                f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
-    usage_l2 = (f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}{INSEP}'
-                f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}')
+    ctx_pct = (total / size * 100) if size else 0.0
+    ctx_clr = r.fill_colour(total / SOFT_LIMIT * 100)
+    ctx_seg = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
+               f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
+    io_seg    = (f'{r.LABEL}↓{r.R}{r.TOK}{fmt_tok(usage.billed_in)}{r.R} '
+                 f'{r.LABEL}↑{r.R}{r.TOK}{fmt_tok(usage.out)}{r.R}')
+    cache_seg = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
+    rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
 
-    # column 3 — money: session  over  day + rate
-    day_clr  = r.day_cost_colour(day_cost)
-    money_l1 = f'{r.COST}${sess_cost:,.2f}{r.R}{r.LABEL} session{r.R}'
-    money_l2 = (f'{r.LABEL}~{day_clr}${day_cost:,.2f}{r.R}{r.LABEL} day{r.R}{INSEP}'
-                f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}')
+    segs = [loc, model, ctx_seg, io_seg, cache_seg, rate_seg]
 
-    cols = [(loc, model), (usage_l1, usage_l2), (money_l1, money_l2)]
-
-    # column 4 — limits (only on a subscription plan, where quotas exist)
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
-        reset  = _fmt_reset(five.resets_at)
-        lim_l1 = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
+        reset    = _fmt_reset(five.resets_at)
+        five_seg = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
         if reset:
-            lim_l1 += f' {r.COMMIT}{reset}{r.R}'
-        lim_l2 = (f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}'
-                  f'{int(seven.used_percentage or 0)}%{r.R}{INSEP}{r.LABEL}plan{r.R}')
-        cols.append((lim_l1, lim_l2))
+            five_seg += f' {r.COMMIT}{reset}{r.R}'
+        seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
+        segs += [five_seg, seven_seg, f'{r.LABEL}plan{r.R}']
 
-    # responsive fit: drop right-most columns, then truncate the location column
-    def widths(cs: list) -> list[int]:
-        return [max(_visible_width(a), _visible_width(b)) for a, b in cs]
-    def total_w(cs: list) -> int:
-        return sum(widths(cs)) + GAP * (len(cs) - 1)
-    while len(cols) > 2 and total_w(cols) > width:
-        cols.pop()
-    if total_w(cols) > width:
-        new_w = max(12, widths(cols)[0] - (total_w(cols) - width))
-        a, b  = cols[0]
-        cols[0] = (_middle_ellipsis(a, new_w), _middle_ellipsis(b, new_w))
-
-    ws  = widths(cols)
-    gap = ' ' * GAP
-    def pad(s: str, w: int) -> str:
-        return s + ' ' * max(0, w - _visible_width(s))
-    line1 = gap.join(pad(a, w) for (a, _), w in zip(cols, ws)).rstrip()
-    line2 = gap.join(pad(b, w) for (_, b), w in zip(cols, ws)).rstrip()
-    return [line1, line2]
+    # responsive: drop segments right-to-left until it fits; truncate loc last
+    while len(segs) > 1 and _visible_width(SEP.join(segs)) > width:
+        segs.pop()
+    line = SEP.join(segs)
+    if _visible_width(line) > width:
+        line = _middle_ellipsis(line, width)
+    return [line]
 
 
 def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
