@@ -2,6 +2,7 @@
 'Claude Code statusLine command (Python port).'
 
 from __future__ import annotations
+import importlib.util
 import json
 import os
 import re
@@ -13,6 +14,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+
+
+# Load the themes module via importlib because this script runs as a top-level
+# file (not inside a package). The same shim is used by test/conftest.py.
+_THEMES_PATH = Path(__file__).resolve().parent / 'statusline' / 'themes.py'
+_themes_spec = importlib.util.spec_from_file_location('statusline_themes', _THEMES_PATH)
+assert _themes_spec is not None and _themes_spec.loader is not None
+themes = importlib.util.module_from_spec(_themes_spec)
+sys.modules['statusline_themes'] = themes
+_themes_spec.loader.exec_module(themes)
+Theme        = themes.Theme
+ModelColors  = themes.ModelColors
+THEMES       = themes.THEMES
+CLAUDE_DARK  = themes.CLAUDE_DARK
 
 
 class BarChars:
@@ -84,7 +99,9 @@ CLR_GOLD       = '\033[38;5;222m'
 CLR_YELLOW     = '\033[38;5;226m'
 CLR_YELLOW_BRT = '\033[38;5;11m'
 CLR_CYAN       = '\033[38;5;116m'
-CLR_CYAN_DIM   = '\033[38;5;103m'
+CLR_CYAN_DIM   = '\033[38;5;244m'
+CLR_CYAN_DAY   = '\033[38;5;109m'
+CLR_CYAN_DAY_DIM = '\033[38;5;240m'
 CLR_CYAN_ICON  = '\033[38;5;117m'
 CLR_PINK       = '\033[38;5;210m'
 CLR_PEACH      = '\033[38;5;216m'
@@ -99,6 +116,31 @@ ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
+GLYPH_FAST     = '\uef76'     # nf-cod-zap (shown when fast_mode is on)
+GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
+GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
+GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
+GLYPH_TASKS    = '\U000f0755'  # nf-md format-list-checks (Task Row marker)
+GLYPH_SKILLS  = '\U000f07df'  # nf-md skills        (skills label)
+GLYPH_PLUGINS = '\uf1e6'      # nf-fa-plug          (plugins label)
+GLYPH_HELPER   = '\uf4cd'     # nf-mdi-star_circle  (5h rate-limit helper)
+GLYPH_TRASH    = '\U000f0a7a' # nf-md-trash_can     (git deleted count)
+GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
+
+# Dim factor for the in-flight (currently-open) sparkline bucket.
+LIVE_DIM = 0.5
+
+# Sparkline slope glyphs from U+1FB3C–U+1FB6B "Symbols for Legacy Computing".
+# Used by GradientEngine.sparkline to draw sloped peaks: a "rise" char on the
+# peak cell pairs with a "fall" char on the next cell to form a /\ shape.
+SPARK_RISE_SMALL  = '\U0001fb48'  # 🭈 small rise (bot row, idx 1–3)
+SPARK_FALL_SMALL  = '\U0001fb3d'  # 🬽 small fall (bot row, idx 1–3)
+SPARK_RISE_MED    = '\U0001fb4a'  # 🭊 medium rise (bot row, idx 4–7)
+SPARK_FALL_MED    = '\U0001fb3f'  # 🬿 medium fall (bot row, idx 4–7)
+SPARK_RISE_TALL   = '\U0001fb45'  # 🭅 tall rise (bot row, idx 8+)
+SPARK_FALL_TALL   = '\U0001fb50'  # 🭐 tall fall (bot row, idx 8+)
+SPARK_RISE_TOP    = '\U0001fb4b'  # 🭋 top-row rise (idx 9+)
+SPARK_FALL_TOP    = '\U0001fb40'  # 🭀 top-row fall (idx 9+)
 
 PILL_TL    = '▗'  # U+2597 lower-right quadrant
 PILL_TOP   = '▄'  # U+2584 lower half block
@@ -147,12 +189,64 @@ class Pill:
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
+    # Supplemental Arrows-C (U+1F800-U+1F8FF) are EAW=N despite being in the
+    # emoji range — exclude them so arrow icons like 🡅/🡇 count as 1 col.
+    if 0x1F800 <= cp <= 0x1F8FF:
+        return False
     return 0x1F300 <= cp <= 0x1FAFF
 
 
 def _visible_width(s: str) -> int:
     plain = _ANSI_RE.sub('', s)
     return sum(2 if _is_wide(ch) else 1 for ch in plain)
+
+
+def _middle_ellipsis(text: str, max_w: int) -> str:
+    if max_w <= 1:
+        return '…'
+    if _visible_width(text) <= max_w:
+        return text
+    left_vis  = (max_w - 1) // 2
+    right_vis = max_w - 1 - left_vis
+
+    # Tokenise into (is_escape, string) pairs to preserve ANSI across the cut.
+    tokens: list[tuple[bool, str]] = []
+    i = 0
+    while i < len(text):
+        m = _ANSI_RE.match(text, i)
+        if m:
+            tokens.append((True, m.group()))
+            i = m.end()
+        else:
+            tokens.append((False, text[i]))
+            i += 1
+
+    def _take(toks: list[tuple[bool, str]], n: int) -> list[str]:
+        out: list[str] = []
+        seen = 0
+        for is_esc, tok in toks:
+            if is_esc:
+                out.append(tok)
+            elif seen < n:
+                out.append(tok)
+                seen += 1
+            else:
+                break
+        return out
+
+    prefix = _take(tokens, left_vis)
+    suffix = _take(list(reversed(tokens)), right_vis)
+    suffix.reverse()
+
+    result = ''.join(prefix) + '…' + ''.join(suffix)
+    if _visible_width(result) <= max_w:
+        return result
+    # Trim one visible char from prefix to fix wide-char overshoot.
+    for j in range(len(prefix) - 1, -1, -1):
+        if not _ANSI_RE.fullmatch(prefix[j]):
+            prefix.pop(j)
+            break
+    return ''.join(prefix) + '…' + ''.join(suffix)
 
 
 class TokenAccounting:
@@ -358,6 +452,7 @@ class SessionInfo:
     exceeds_200k_tokens: bool = False
     effort: Effort = field(default_factory=Effort)
     thinking: Thinking = field(default_factory=Thinking)
+    fast_mode: bool = False
     rate_limits: RateLimits = field(default_factory=RateLimits)
 
     @classmethod
@@ -375,6 +470,7 @@ class SessionInfo:
             exceeds_200k_tokens = d.get('exceeds_200k_tokens', False),
             effort              = Effort.from_dict(d.get('effort') or {}),
             thinking            = Thinking.from_dict(d.get('thinking') or {}),
+            fast_mode           = bool(d.get('fast_mode', False)),
             rate_limits         = RateLimits.from_dict(d.get('rate_limits') or {}),
         )
 
@@ -402,7 +498,9 @@ class SessionInfo:
     @property
     def model_thinking(self) -> str:
         if self.thinking.enabled and self.effort.level:
-            return self.effort.level
+            return f'{self.effort.level}/fast' if self.fast_mode else self.effort.level
+        if self.fast_mode:
+            return 'fast'
         return ''
 
     @property
@@ -533,13 +631,14 @@ class TokenRate:
                     to = int(parts[3])
                 except ValueError:
                     continue
-                if sid == session_id and now - ts <= window:
+                if sid == session_id and now - ts <= window + window / n_buckets:
                     samples.append((ts, ti, to))
         if len(samples) < 2:
             return [0] * n_buckets
         samples.sort()
         bucket_size = window / n_buckets
-        start = now - window
+        last_bucket  = int(now // bucket_size)
+        first_bucket = last_bucket - n_buckets + 1
         buckets = [0] * n_buckets
         for i in range(len(samples) - 1):
             ts0, ti0, to0 = samples[i]
@@ -548,10 +647,37 @@ class TokenRate:
             if delta == 0:
                 continue
             midpoint = (ts0 + ts1) / 2
-            idx = int((midpoint - start) / bucket_size)
-            idx = max(0, min(n_buckets - 1, idx))
-            buckets[idx] += delta
+            abs_bucket = int(midpoint // bucket_size)
+            if first_bucket <= abs_bucket <= last_bucket:
+                buckets[abs_bucket - first_bucket] += delta
         return buckets
+
+    @classmethod
+    def recently_active(cls, session_id: str, window: float = 10.0) -> tuple[bool, bool]:
+        """Return (in_active, out_active) — True if that count grew in the last `window` seconds."""
+        if not session_id:
+            return False, False
+        log = HOME / '.claude' / 'statusline-token-rate.log'
+        if not log.exists():
+            return False, False
+        now = time.time()
+        samples: list[tuple[float, int, int]] = []
+        for ln in log.read_text().splitlines():
+            parts = ln.split()
+            if len(parts) < 4:
+                continue
+            try:
+                ts, sid, ti, to = float(parts[0]), parts[1], int(parts[2]), int(parts[3])
+            except ValueError:
+                continue
+            if sid == session_id and now - ts <= window:
+                samples.append((ts, ti, to))
+        if len(samples) < 2:
+            return False, False
+        samples.sort()
+        ti0, to0 = samples[0][1], samples[0][2]
+        ti1, to1 = samples[-1][1], samples[-1][2]
+        return ti1 > ti0, to1 > to0
 
 
 @dataclass
@@ -560,19 +686,23 @@ class GitInfo:
     commit: str = ''
     modified: int = 0
     untracked: int = 0
+    deleted: int = 0
+    renamed: int = 0
 
     @classmethod
     def from_cwd(cls, cwd: str) -> GitInfo:
         repo, gitdir   = cls._find_repo(cwd)
         branch, commit = cls._read_head(gitdir)
-        modified = untracked = 0
+        modified = untracked = deleted = renamed = 0
         if branch:
-            modified, untracked = cls._dirty(repo)
+            modified, untracked, deleted, renamed = cls._dirty(repo)
         return cls(
             branch    = branch,
             commit    = commit,
             modified  = modified,
             untracked = untracked,
+            deleted   = deleted,
+            renamed   = renamed,
         )
 
     @staticmethod
@@ -620,28 +750,40 @@ class GitInfo:
         return branch, commit
 
     @staticmethod
-    def _dirty(repo: str) -> tuple[int, int]:
-        modified = untracked = 0
+    def _dirty(repo: str) -> tuple[int, int, int, int]:
+        modified = untracked = deleted = renamed = 0
         if not repo:
-            return modified, untracked
+            return modified, untracked, deleted, renamed
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'ls-files', '-m'],
+                ['git', '-C', repo, 'status', '--porcelain=v1', '-z',
+                 '--untracked-files=normal'],
                 capture_output=True, text=True, timeout=2,
             )
-            modified = sum(1 for ln in r.stdout.splitlines() if ln.strip())
         except Exception:
-            pass
-        try:
-            r = subprocess.run(
-                ['git', '-C', repo, 'ls-files', '--others', '--exclude-standard',
-                 '--directory', '--no-empty-directory'],
-                capture_output=True, text=True, timeout=2,
-            )
-            untracked = sum(1 for ln in r.stdout.splitlines() if ln.strip())
-        except Exception:
-            pass
-        return modified, untracked
+            return modified, untracked, deleted, renamed
+        entries = [e for e in r.stdout.split('\0') if e]
+        i = 0
+        while i < len(entries):
+            entry = entries[i]
+            if len(entry) < 2:
+                i += 1
+                continue
+            x, y = entry[0], entry[1]
+            if x == 'R' or y == 'R':
+                renamed += 1
+                i += 2  # rename consumes a second NUL-separated original-name field
+                continue
+            if x == '?' and y == '?':
+                untracked += 1
+            elif x == 'A' or y == 'A':
+                untracked += 1
+            elif x == 'D' or y == 'D':
+                deleted += 1
+            elif x == 'M' or y == 'M':
+                modified += 1
+            i += 1
+        return modified, untracked, deleted, renamed
 
 
 @dataclass
@@ -680,10 +822,19 @@ class LoadedSkills:
 
 
 @dataclass
-class RunningSubagents:
-    subagents: list[tuple[str, str]] = field(default_factory=list)  # (agentType, description)
+class RunningSubagent:
+    agent_type: str
+    description: str
+    billed_in: int
+    output: int
+    first_timestamp: float  # epoch seconds; baseline for live duration
 
-    STALE_SECONDS = 30
+
+@dataclass
+class RunningSubagents:
+    subagents: list[RunningSubagent] = field(default_factory=list)
+
+    STALE_SECONDS = 20
 
     @classmethod
     def from_session(cls, session_id: str, project_dir: str) -> RunningSubagents:
@@ -696,7 +847,7 @@ class RunningSubagents:
         if not subagents_dir.is_dir():
             return cls()
         now = time.time()
-        subagents: list[tuple[str, str]] = []
+        subagents: list[RunningSubagent] = []
         try:
             for meta in subagents_dir.glob('*.meta.json'):
                 agent_type = ''
@@ -717,10 +868,169 @@ class RunningSubagents:
                         continue
                 except OSError:
                     continue
-                subagents.append((agent_type, description))
+
+                billed_in, output, first_ts = cls._parse_transcript(jsonl)
+                subagents.append(RunningSubagent(
+                    agent_type      = agent_type,
+                    description     = description,
+                    billed_in       = billed_in,
+                    output          = output,
+                    first_timestamp = first_ts,
+                ))
         except OSError:
             pass
+        subagents.sort(key=lambda s: s.first_timestamp)
         return cls(subagents=subagents)
+
+    @staticmethod
+    def _parse_transcript(jsonl: Path) -> tuple[int, int, float]:
+        seen: set[str] = set()
+        billed_in = 0
+        output    = 0
+        first_ts  = 0.0
+        try:
+            with jsonl.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if first_ts == 0.0 and '"timestamp"' in ln:
+                        try:
+                            d = json.loads(ln)
+                            ts = d.get('timestamp', '')
+                            if ts:
+                                first_ts = _parse_iso_to_epoch(ts)
+                        except (ValueError, TypeError):
+                            pass
+                    if '"usage"' not in ln or '"assistant"' not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except (ValueError, TypeError):
+                        continue
+                    msg = d.get('message') or {}
+                    mid = msg.get('id')
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    u = msg.get('usage') or {}
+                    billed_in += (u.get('input_tokens', 0) or 0) + (u.get('cache_creation_input_tokens', 0) or 0)
+                    output    += u.get('output_tokens', 0) or 0
+        except OSError:
+            pass
+        return billed_in, output, first_ts
+
+
+def _parse_iso_to_epoch(ts: str) -> float:
+    try:
+        if ts.endswith('Z'):
+            ts = ts[:-1] + '+00:00'
+        return datetime.fromisoformat(ts).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
+@dataclass
+class Task:
+    id: int
+    subject: str
+    active_form: str
+    status: str  # 'pending' | 'in_progress' | 'completed'
+
+
+@dataclass
+class TaskList:
+    tasks: list[Task] = field(default_factory=list)
+    last_event_ts: float = 0.0
+
+    FRESHNESS_CAP = 120.0  # 2 min — see docs/adr/0004
+    GRACE_SECONDS = 20.0   # matches RunningSubagents.STALE_SECONDS
+
+    @classmethod
+    def from_session(cls, transcript_path: str) -> TaskList:
+        if not transcript_path:
+            return cls()
+        path = Path(transcript_path)
+        if not path.is_file():
+            return cls()
+        by_id: dict[int, Task] = {}
+        next_id = 1
+        last_ts = 0.0
+        try:
+            with path.open('r', errors='ignore') as fh:
+                for ln in fh:
+                    if '"TaskCreate"' not in ln and '"TaskUpdate"' not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except ValueError:
+                        continue
+                    ts = _parse_iso_to_epoch(d.get('timestamp', ''))
+                    content = d.get('message', {}).get('content', [])
+                    if not isinstance(content, list):
+                        continue
+                    for c in content:
+                        if not isinstance(c, dict) or c.get('type') != 'tool_use':
+                            continue
+                        name = c.get('name', '')
+                        inp  = c.get('input') or {}
+                        if name == 'TaskCreate':
+                            subj = inp.get('subject', '') or ''
+                            af   = inp.get('activeForm', '') or subj
+                            by_id[next_id] = Task(id=next_id, subject=subj, active_form=af, status='pending')
+                            next_id += 1
+                            if ts > last_ts: last_ts = ts
+                        elif name == 'TaskUpdate':
+                            try:
+                                tid = int(inp.get('taskId', '0'))
+                            except (TypeError, ValueError):
+                                continue
+                            t = by_id.get(tid)
+                            if not t:
+                                continue
+                            new_status = inp.get('status')
+                            if new_status in ('pending', 'in_progress', 'completed'):
+                                t.status = new_status
+                            if 'activeForm' in inp and inp['activeForm']:
+                                t.active_form = inp['activeForm']
+                            if 'subject' in inp and inp['subject']:
+                                t.subject = inp['subject']
+                            if ts > last_ts: last_ts = ts
+        except OSError:
+            return cls()
+        tasks = [by_id[k] for k in sorted(by_id.keys())]
+        return cls(tasks=tasks, last_event_ts=last_ts)
+
+    @property
+    def total(self) -> int:
+        return len(self.tasks)
+
+    @property
+    def completed(self) -> int:
+        return sum(1 for t in self.tasks if t.status == 'completed')
+
+    @property
+    def active(self) -> Task | None:
+        for t in reversed(self.tasks):
+            if t.status == 'in_progress':
+                return t
+        return None
+
+    @property
+    def next_pending(self) -> Task | None:
+        for t in self.tasks:
+            if t.status == 'pending':
+                return t
+        return None
+
+    def is_visible(self, now: float | None = None) -> bool:
+        if not self.tasks or self.last_event_ts <= 0:
+            return False
+        if now is None:
+            now = time.time()
+        age = now - self.last_event_ts
+        if age > self.FRESHNESS_CAP:
+            return False
+        if self.completed == self.total:
+            return age <= self.GRACE_SECONDS
+        return True
 
 
 @dataclass
@@ -837,6 +1147,17 @@ def fmt_tok(n: int) -> str:
     return str(n)
 
 
+def fmt_dur(seconds: float) -> str:
+    s = int(seconds)
+    if s < 0:
+        s = 0
+    if s < 60:
+        return f'{s}s'
+    if s < 3600:
+        return f'{s // 60}m{s % 60:02d}s'
+    return f'{s // 3600}h{(s % 3600) // 60:02d}m'
+
+
 RAINBOW_PALETTE = (
     196, 202, 208, 214, 220, 226, 190, 154, 118, 82,
     46, 47, 48, 49, 50, 51, 45, 39, 33, 27,
@@ -856,27 +1177,6 @@ def rainbow_at(step: int, offset: int = 0) -> str:
 def rainbow_color() -> str:
     return rainbow_at(rainbow_step())
 
-
-ANCHOR_RGB = {
-    'opus':   (255, 255,   0),
-    'sonnet': (135, 215, 135),
-    'haiku':  ( 95, 175, 255),
-    'other':  (215, 175, 255),
-}
-
-SHIFT_WARM = {
-    'opus':   (255, 165,   0),
-    'sonnet': ( 44, 208, 168),
-    'haiku':  (123, 230, 255),
-    'other':  (240, 165, 224),
-}
-
-SHIFT_COOL = {
-    'opus':   (180, 230,  60),
-    'sonnet': ( 44, 140,  80),
-    'haiku':  ( 74, 110, 224),
-    'other':  (138, 111, 214),
-}
 
 LEVEL_PCT = {
     'low':    30,
@@ -904,7 +1204,9 @@ def _scale(rgb: tuple[int, int, int], pct: int) -> tuple[int, int, int]:
 def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]],
                   anchor: tuple[int, int, int],
                   shift: tuple[int, int, int],
-                  pct: int) -> str:
+                  pct: int,
+                  pill_fg_dark:  tuple[int, int, int] = (15, 15, 15),
+                  pill_fg_light: tuple[int, int, int] | None = None) -> str:
     c0 = _scale(anchor, pct)
     c1 = _scale(shift, pct)
     n = max(1, len(cells) - 1)
@@ -917,7 +1219,12 @@ def paint_bg_span(cells: list[tuple[str, tuple[int, int, int] | None, bool, bool
         g = int(c0[1] + (c1[1] - c0[1]) * t)
         b = int(c0[2] + (c1[2] - c0[2]) * t)
         lum = (r * 299 + g * 587 + b * 114) // 1000
-        fg_rgb = (15, 15, 15) if lum >= BG_LUM_THRESHOLD else (fg if fg is not None else None)
+        if lum >= BG_LUM_THRESHOLD:
+            fg_rgb = pill_fg_dark
+        elif pill_fg_light is not None:
+            fg_rgb = pill_fg_light
+        else:
+            fg_rgb = fg if fg is not None else None
         cur_bg = (r, g, b)
         if cur_bg != prev_bg:
             parts.append(f'\033[48;2;{r};{g};{b}m')
@@ -959,26 +1266,35 @@ def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
     return f'[38;2;{r};{g};{b}m'
 
 
-def _short_agent_name(agent_type: str, description: str) -> str:
-    if agent_type.lower() in ('general-purpose', 'explore', 'plan'):
-        parts = description.split(' - ', 1)
-        return parts[0] if len(parts) > 1 else description[:20]
-    return agent_type.replace('-executor', '')
-
 class GradientEngine:
-    GRAD_STOPS = (
-        (0.00, ( 40, 210,  80)),
-        (0.25, ( 80, 230,  40)),
-        (0.45, (180, 240,  20)),
-        (0.55, (240, 230,  20)),
-        (0.68, (255, 170,  15)),
-        (0.78, (250, 100,  20)),
-        (0.88, (235,  55,  35)),
-        (1.00, (210,  20,  50)),
-    )
-    GREY_RGB = (108, 108, 108)
-    FADE     = 0.06
+    FADE        = 0.06
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
+
+    def __init__(self, theme: Theme | None = None) -> None:
+        t = theme if theme is not None else CLAUDE_DARK
+        self.theme       = t
+        self.GRAD_STOPS  = t.grad_stops
+        self.GREY_RGB    = t.grey_rgb
+        self.SPARK_STOPS = t.spark_stops
+        self.BORDER_OFF  = t.border_off
+
+    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
+        t = max(0.0, min(1.0, t))
+        for i in range(len(self.SPARK_STOPS) - 1):
+            t0, c0 = self.SPARK_STOPS[i]
+            t1, c1 = self.SPARK_STOPS[i + 1]
+            if t <= t1:
+                u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+                r = int((c0[0] + (c1[0] - c0[0]) * u) * dim)
+                g = int((c0[1] + (c1[1] - c0[1]) * u) * dim)
+                b = int((c0[2] + (c1[2] - c0[2]) * u) * dim)
+                return r, g, b
+        r, g, b = self.SPARK_STOPS[-1][1]
+        return int(r * dim), int(g * dim), int(b * dim)
+
+    def spark_color(self, t: float, dim: float = 1.0) -> str:
+        r, g, b = self.spark_rgb(t, dim)
+        return f'\033[38;2;{r};{g};{b}m'
 
     def gradient_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
@@ -1002,12 +1318,12 @@ class GradientEngine:
         denom = max(1, width - 1)
         t = col / denom
         if fill <= 0:
-            return CLR_BORDER_OFF
+            return self.BORDER_OFF
         fade = self.FADE
         if t <= fill - fade:
             return self.gradient_color(t, dim)
         if t >= fill + fade:
-            return CLR_BORDER_OFF
+            return self.BORDER_OFF
         er, eg, eb = self.gradient_rgb(min(t, fill), dim)
         gr, gg, gb = self.GREY_RGB
         u = max(0.0, min(1.0, (t - (fill - fade)) / (2 * fade)))
@@ -1027,27 +1343,77 @@ class GradientEngine:
             parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
-    def sparkline(self, history: list[int]) -> str:
+    def _spark_flat(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 8:
+            return ' ', self.SPARK_CHARS[idx - 1]
+        return self.SPARK_CHARS[idx - 9], '█'
+
+    def _spark_rise(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 3:
+            return ' ', SPARK_RISE_SMALL
+        if idx <= 7:
+            return ' ', SPARK_RISE_MED
+        if idx <= 8:
+            return ' ', SPARK_RISE_TALL
+        return SPARK_RISE_TOP, SPARK_RISE_TALL
+
+    def _spark_fall(self, idx: int) -> tuple[str, str]:
+        if idx <= 0:
+            return ' ', self.SPARK_CHARS[0]
+        if idx <= 3:
+            return ' ', SPARK_FALL_SMALL
+        if idx <= 7:
+            return ' ', SPARK_FALL_MED
+        if idx <= 8:
+            return ' ', SPARK_FALL_TALL
+        return SPARK_FALL_TOP, SPARK_FALL_TALL
+
+    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
         if not history:
-            return ''
+            return '', ''
         max_val = max(history)
-        parts = []
-        for val in history:
-            if val == 0 or max_val == 0:
-                parts.append(' ')
+        indices = [
+            min(int(((v / max_val) if max_val > 0 else 0.0) * 16), 16)
+            for v in history
+        ]
+        last_i  = len(indices) - 1
+        top_parts = []
+        bot_parts = []
+        for i, idx in enumerate(indices):
+            prev_idx = indices[i - 1] if i > 0 else 0
+            if idx > prev_idx:
+                top_ch, bot_ch = self._spark_rise(idx)
+                tint_idx       = idx
+            elif prev_idx > idx:
+                top_ch, bot_ch = self._spark_fall(prev_idx)
+                tint_idx       = prev_idx
             else:
-                ratio = val / max_val
-                idx = min(int(ratio * 7), 7)
-                parts.append(f'{self.gradient_color(ratio)}{self.SPARK_CHARS[idx]}{RESET}')
-        return ''.join(parts)
+                top_ch, bot_ch = self._spark_flat(idx)
+                tint_idx       = idx
+            ratio     = tint_idx / 16.0
+            ratio_bot = ratio * 0.5
+            ratio_top = 0.5 + ratio * 0.5
+            if live and i == last_i:
+                bot_clr = self.spark_color(ratio_bot, dim=LIVE_DIM)
+                top_clr = self.spark_color(ratio_top, dim=LIVE_DIM)
+            else:
+                bot_clr = self.spark_color(ratio_bot)
+                top_clr = self.spark_color(ratio_top)
+            top_parts.append(f'{top_clr}{top_ch}{RESET}')
+            bot_parts.append(f'{bot_clr}{bot_ch}{RESET}')
+        return ''.join(top_parts), ''.join(bot_parts)
 
 
 class BorderRenderer:
     def __init__(self, gradient: GradientEngine):
         self.gradient = gradient
+        self.SESSION  = gradient.theme.session
 
-    R       = RESET
-    SESSION = CLR_GREY_DIM
+    R = RESET
 
     def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
         downs_set = set(downs)
@@ -1067,9 +1433,11 @@ class BorderRenderer:
             parts = [self.gradient.grad_at(0, width, fill=fill), '╭']
         if session_id:
             avail = max(0, width - 4)
+            if p.active and p.end == width and p.start > 5:
+                avail = max(0, min(avail, p.start - 5))
             sid = session_id if len(session_id) <= avail else session_id[:max(0, avail - 1)] + '…'
             sid_w = _visible_width(sid)
-            parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, sid]
+            parts += [_clr(2, 1), _ch(2), _clr(3, 2), _ch(3), self.SESSION, ITALIC, sid, '\033[23m']
             offset = 3 + sid_w
             rest = max(0, width - 4 - sid_w)
             for i in range(rest):
@@ -1079,7 +1447,10 @@ class BorderRenderer:
             for i in range(1, width - 1):
                 col = i + 1
                 parts += [_clr(col, i), _ch(col)]
-        parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╮', self.R]
+        if p.active and p.start <= width <= p.end:
+            parts += [p.border_fg(width), p.border_char(width, 'top'), self.R]
+        else:
+            parts += [self.gradient.grad_at(width - 1, width, fill=fill), '╮', self.R]
         return ''.join(parts)
 
     def border_bottom(self, width: int, ups: tuple[int, ...] = (), fill: float = 1.0) -> str:
@@ -1100,15 +1471,25 @@ class BorderRenderer:
         parts += [self.gradient.grad_at(width - 1, width, fill=fill), '┤', self.R]
         return ''.join(parts)
 
+    DIM_MIN  = 0.6
+    DIM_RAMP = 5
+
+    def _dim_for_col(self, col: int, elbow_cols: set[int]) -> float:
+        d = min(abs(col - e) for e in elbow_cols)
+        if d == 0:
+            return 1.0
+        return max(self.DIM_MIN, 1.0 - (1.0 - self.DIM_MIN) * (d / self.DIM_RAMP))
+
     def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
         downs_set = set(downs)
         ups_set = set(ups)
+        elbow_cols = {1, width} | downs_set | ups_set
         p = pill or Pill()
         edge = pill_edge if pill_edge == 'top' else 'bottom'
         if p.active and p.start <= 1:
             parts = [p.border_fg(p.start), p.border_char(p.start, edge)]
         else:
-            parts = [self.gradient.grad_at(0, width, 0.6, fill=fill), '├']
+            parts = [self.gradient.grad_at(0, width, self._dim_for_col(1, elbow_cols), fill=fill), '├']
         for i in range(width - 2):
             col = i + 2
             pc = p.border_char(col, edge) if p.active else ''
@@ -1123,11 +1504,20 @@ class BorderRenderer:
                     ch = '┴'
                 else:
                     ch = '┄'
-                parts += [self.gradient.grad_at(i + 1, width, 0.6, fill=fill), ch]
-        parts += [self.gradient.grad_at(width - 1, width, 0.6, fill=fill), '┤', self.R]
+                parts += [self.gradient.grad_at(i + 1, width, self._dim_for_col(col, elbow_cols), fill=fill), ch]
+        if p.active and p.start <= width <= p.end:
+            parts += [p.border_fg(width), p.border_char(width, edge), self.R]
+        else:
+            parts += [self.gradient.grad_at(width - 1, width, self._dim_for_col(width, elbow_cols), fill=fill), '┤', self.R]
         return ''.join(parts)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False) -> str:
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
+        if right_pill:
+            pill_w  = _visible_width(right_pill)
+            pad     = max(0, width - 2 - _visible_width(content) - pill_w)
+            left    = self.gradient.grad_at(0, width, fill=fill)
+            lead    = f'{bg_lead} \033[49m' if bg_lead else ' '
+            return f'{left}│{self.R}{lead}{content}{" " * pad}{right_pill}{self.R}'
         if pill_flush:
             pad = max(0, width - 1 - _visible_width(content))
             right = self.gradient.grad_at(width - 1, width, fill=fill)
@@ -1145,22 +1535,58 @@ class BorderRenderer:
 
 
 class Renderer:
-    def __init__(self, bg_shift: str = 'warm'):
+    def __init__(self, bg_shift: str = 'warm', theme: Theme | None = None) -> None:
         self.bg_shift = bg_shift if bg_shift in ('warm', 'cool') else 'warm'
-        self.gradient = GradientEngine()
-        self.border = BorderRenderer(self.gradient)
+        self.theme    = theme if theme is not None else CLAUDE_DARK
+        self.gradient = GradientEngine(self.theme)
+        self.border   = BorderRenderer(self.gradient)
+        self._apply_theme(self.theme)
 
-    def _bg_shift_table(self) -> dict:
-        return SHIFT_WARM if self.bg_shift == 'warm' else SHIFT_COOL
+    def _apply_theme(self, t: Theme) -> None:
+        self.BORDER      = t.border
+        self.PWD         = t.pwd
+        self.BRANCH      = t.branch
+        self.COMMIT      = t.commit
+        self.SESSION     = t.session
+        self.MODEL       = t.model
+        self.SKILLS      = t.skills
+        self.TIME        = t.time
+        self.TOK         = t.tok
+        self.TOK_DIM     = t.tok_dim
+        self.TOK_DAY     = t.tok_day
+        self.TOK_DAY_DIM = t.tok_day_dim
+        self.COST        = t.cost
+        self.BAR_FILL    = t.bar_fill
+        self.BAR_EMPTY   = t.bar_empty
+        self.DIM_GREEN   = t.dim_green
+        self.LABEL       = t.label
+        self.CTX         = t.ctx
+        self.BOLDW       = BOLD + t.white_brt
+        self.BOLDY       = t.tok_arrow
+        self.DIRTY       = t.dirty
+        self.ICON_PATH   = t.icon_path
+        self.ARROW       = t.arrow
+        self.TOK_ICON    = t.tok_icon
+        self.OPUS        = t.models['opus'].label
+        self.SONNET      = t.models['sonnet'].label
+        self.HAIKU       = t.models['haiku'].label
+        self.safe        = t.safe
+        self.warn        = t.warn
+        self.alert       = t.alert
+        self.yellow      = t.yellow
+        self.white_brt   = t.white_brt
+        self.pill_fg_dark    = t.pill_fg_dark
+        self.pill_fg_light   = t.pill_fg_light
+        self.SPEC_GRADIENTS  = t.spec_gradients
+        self.spec_empty_ansi = t.spec_empty_ansi
 
     def _model_bg_pct(self, effort_level: str) -> int:
         return LEVEL_PCT.get(effort_level.lower(), 0)
 
     def _model_anchor_pair(self, model_name: str) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
-        key    = model_key(model_name)
-        anchor = ANCHOR_RGB[key]
-        shift  = self._bg_shift_table()[key]
-        return anchor, shift
+        mc    = self.theme.models[model_key(model_name)]
+        shift = mc.warm_shift if self.bg_shift == 'warm' else mc.cool_shift
+        return mc.anchor, shift
 
     def model_bg_lead(self, model_name: str, effort_level: str) -> str:
         pct = self._model_bg_pct(effort_level)
@@ -1189,6 +1615,8 @@ class Renderer:
     TIME      = CLR_GREY_DIM
     TOK       = CLR_CYAN
     TOK_DIM   = CLR_CYAN_DIM
+    TOK_DAY     = CLR_CYAN_DAY
+    TOK_DAY_DIM = CLR_CYAN_DAY_DIM
     COST      = CLR_PINK
     BAR_FILL  = CLR_GREEN_OK
     BAR_EMPTY = CLR_GREY_DARK
@@ -1206,8 +1634,9 @@ class Renderer:
     HAIKU     = CLR_SKY_BLUE
 
     # --- Gradient delegations (backward compat) ---
-    GRAD_STOPS  = GradientEngine.GRAD_STOPS
-    GREY_RGB    = GradientEngine.GREY_RGB
+    # GRAD_STOPS / GREY_RGB / SPARK_STOPS now live on the GradientEngine
+    # instance (driven by the active Theme). The legacy class-level constants
+    # are gone; callers reach them via r.gradient.GRAD_STOPS etc.
     FADE        = GradientEngine.FADE
     SPARK_CHARS = GradientEngine.SPARK_CHARS
 
@@ -1223,8 +1652,19 @@ class Renderer:
     def gradient_bar(self, filled: int, bar_w: int) -> str:
         return self.gradient.gradient_bar(filled, bar_w)
 
-    def sparkline(self, history: list[int]) -> str:
-        return self.gradient.sparkline(history)
+    def vsep_block(self, col: int, width: int, fill: float = 1.0, *, leader: bool = False) -> str:
+        color    = self.gradient.grad_at(col - 1, width, fill=fill)
+        trailing = ' ' if leader else '  '
+        return f'  {color}│{self.R}{trailing}'
+
+    def sparkline(self, history: list[int], live: bool = False) -> tuple[str, str]:
+        return self.gradient.sparkline(history, live)
+
+    def spark_rgb(self, t: float, dim: float = 1.0) -> tuple[int, int, int]:
+        return self.gradient.spark_rgb(t, dim)
+
+    def spark_color(self, t: float, dim: float = 1.0) -> str:
+        return self.gradient.spark_color(t, dim)
 
     # --- Border delegations (backward compat) ---
     def border_top(self, width: int, session_id: str = '', downs: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None) -> str:
@@ -1239,112 +1679,99 @@ class Renderer:
     def border_separator_dim(self, width: int, downs: tuple[int, ...] = (), ups: tuple[int, ...] = (), fill: float = 1.0, pill: Pill | None = None, pill_edge: str = 'bottom') -> str:
         return self.border.border_separator_dim(width, downs, ups, fill, pill, pill_edge)
 
-    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False) -> str:
-        return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush)
+    def border_line(self, content: str, width: int, fill: float = 1.0, bg_lead: str = '', bg_trail: str = '', pill_flush: bool = False, right_pill: str = '') -> str:
+        return self.border.border_line(content, width, fill, bg_lead, bg_trail, pill_flush, right_pill)
 
-    def path_git(self, short_pwd: str, git: GitInfo, elapsed: str = '') -> str:
+    def path_git(
+        self, short_pwd: str, git: GitInfo, elapsed: str = '',
+        *, show_commit: bool = True, show_dirty: bool = True, show_elapsed: bool = True,
+    ) -> str:
         dirty = ''
-        if git.modified > 0:
-            dirty += f'{CLR_WARN}●{git.modified}{RESET}'
-        if git.untracked > 0:
-            dirty += f'{CLR_WARN}*{git.untracked}{RESET}'
-        if dirty:
-            dirty = ' ' + dirty
-        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (elapsed and elapsed != '0m') else ''
+        if show_dirty:
+            if git.untracked > 0:
+                dirty += f'{self.DIRTY}•{git.untracked}{RESET}'
+            if git.modified > 0:
+                dirty += f'{self.DIRTY}*{git.modified}{RESET}'
+            if git.deleted > 0:
+                dirty += f'{self.DIRTY}-{git.deleted}{RESET}'
+            if git.renamed > 0:
+                dirty += f'{self.DIRTY}{GLYPH_RENAMED} {git.renamed}{RESET}'
+            if dirty:
+                dirty = ' ' + dirty
+        tail = f' {self.SESSION}[{elapsed}]{self.R}' if (show_elapsed and elapsed and elapsed != '0m') else ''
+        commit_part = f'{self.LABEL}/{self.R}{self.COMMIT}{git.commit}{self.R}' if show_commit else ''
 
         return (
-            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}{GLYPH_FOLDER}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
-            f'{self.LABEL}/{self.R}'
-            f'{self.COMMIT}{git.commit}{self.R}'
-            f'{dirty}{tail}'
+            f'{commit_part}{dirty}{tail}'
         )
-
-    def path_model_row(self, left: str, right: str, box_width: int, pill_active: bool = False) -> tuple[str, int] | None:
-        if pill_active:
-            vsep = '  '
-            vsep_w = 2
-        else:
-            vsep = f'  {self.BORDER}│{self.R}  '
-            vsep_w = 5
-        left_w = _visible_width(left)
-        right_w = _visible_width(right)
-        content_w = box_width - 3
-        if left_w + vsep_w + right_w > content_w:
-            return None
-        div_col = 3 + left_w + 2
-        return f'{left}{vsep}{right}', div_col
 
     def path_git_compact(self, short_pwd: str, git: GitInfo) -> str:
         return (
-            f'{CLR_CYAN_ICON}  {self.PWD}{short_pwd}{self.R}'
-            f' {self.LABEL}{CLR_GREEN_BRT}{BOLD}∈{self.R}'
+            f'{self.ICON_PATH}  {self.PWD}{short_pwd}{self.R}'
+            f' {self.LABEL}{self.ARROW}{BOLD}∈{self.R}'
             f' {self.BRANCH}{git.branch}{self.R}'
         )
 
+    def fit_path(
+        self, short_pwd: str, git: GitInfo, elapsed: str, target_w: int,
+        *, compact_only: bool = False,
+    ) -> str:
+        def fits(s: str) -> bool:
+            return _visible_width(s) <= target_w
+
+        if not compact_only:
+            for kwargs in (
+                {},
+                {'show_commit': False},
+                {'show_commit': False, 'show_elapsed': False},
+                {'show_commit': False, 'show_elapsed': False, 'show_dirty': False},
+            ):
+                candidate = self.path_git(short_pwd, git, elapsed, **kwargs)
+                if fits(candidate):
+                    return candidate
+
+        compact = self.path_git_compact(short_pwd, git)
+        if fits(compact):
+            return compact
+
+        # Ellipsis on short_pwd only
+        for pwd_w in range(target_w - 1, 0, -1):
+            trunc_pwd = _middle_ellipsis(short_pwd, pwd_w)
+            candidate = self.path_git_compact(trunc_pwd, git)
+            if fits(candidate):
+                return candidate
+
+        # Ellipsis on both short_pwd and branch
+        # Overhead of path_git_compact with empty strings is 5 visible chars.
+        half = max(1, (target_w - 5) // 2)
+        trunc_pwd    = _middle_ellipsis(short_pwd,  half)
+        trunc_branch = _middle_ellipsis(git.branch, half)
+        truncated_git = GitInfo(
+            branch=trunc_branch, commit=git.commit,
+            modified=git.modified, untracked=git.untracked,
+            deleted=git.deleted, renamed=git.renamed,
+        )
+        return self.path_git_compact(trunc_pwd, truncated_git)
+
     def model_colour(self, model_name: str) -> str:
-        m = model_name.lower()
-        if 'opus' in m:
-            return CLR_YELLOW
-        if 'sonnet' in m:
-            return CLR_GREEN_OK
-        if 'haiku' in m:
-            return CLR_SKY_BLUE
-        return CLR_PURPLE
+        return self.theme.models[model_key(model_name)].label
 
     def fill_colour(self, pct: float) -> str:
         if pct >= 90:
-            return CLR_ALERT
+            return self.alert
         if pct >= 70:
-            return CLR_WARN
-        return CLR_GREEN_OK
+            return self.warn
+        return self.safe
 
     def day_cost_colour(self, cost: float) -> str:
         if cost > 50:
-            return CLR_ALERT
+            return self.alert
         if cost >= 25:
-            return CLR_YELLOW
-        return CLR_GREEN_OK
-
-    def model_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '') -> tuple[str, int]:
-        step      = rainbow_step()
-        c_think   = rainbow_at(step, 0)
-        c_helper  = rainbow_at(step, 9)
-        model_clr = self.model_colour(model_name)
-        pct       = self._model_bg_pct(effort_level)
-        if pct:
-            anchor, shift = self._model_anchor_pair(model_name)
-            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
-            cells.append((GLYPH_MODEL,    anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            for ch in model_name:
-                cells.append((ch, anchor, False, False))
-            cells.append((' ',            anchor, False, False))
-            cells.append((GLYPH_THINKING, anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            cells.append((' ',            anchor, True,  False))
-            for ch in model_thinking:
-                cells.append((ch, anchor, False, True))
-            cells.append((' ', anchor, False, False))
-            pill_left = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
-            pill_right = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
-            line = pill_left + paint_bg_span(cells, anchor, shift, pct) + pill_right + RESET
-        else:
-            line = f'{model_clr}󰢹  {model_name}{self.R} {c_think}{BOLD}󱩓  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
-        left_w = _visible_width(line)
-        if pct:
-            vsep = '  '
-            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
-        else:
-            vsep = f'  {self.BORDER}│{self.R}  '
-            line += f'{vsep}{c_helper}{BOLD}{self.R} {CLR_WHITE_BRT}{BOLD} {self.helper(rate_limits.five_hour)}{self.R}'
-        seven_day = rate_limits.seven_day
-        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
-            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            line += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
-        return line, left_w if pct else left_w + 2
+            return self.yellow
+        return self.safe
 
     def model_section_compact(self, model_name: str, rate_limits: RateLimits, max_width: int, effort_level: str = '') -> tuple[str, int]:
         model_clr = self.model_colour(model_name)
@@ -1381,17 +1808,17 @@ class Renderer:
                 cells.append((' ', anchor, False, False))
                 pill_l = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
                 pill_r = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
-                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg) + pill_r + RESET
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
                 pw = _visible_width(painted)
                 return (
                     f'{painted}'
                     f'{self.LABEL}|{self.R}'
-                    f' {c_helper}{BOLD}{self.R} {rate}'
+                    f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
                 ), pw
             return (
-                f'{model_clr}󰢹  {name}{self.R}'
+                f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
                 f' {self.LABEL}|{self.R}'
-                f' {c_helper}{BOLD}{self.R} {rate}'
+                f' {c_helper}{BOLD}{GLYPH_HELPER}{self.R} {rate}'
             ), 0
 
         if rate_with_time:
@@ -1407,28 +1834,179 @@ class Renderer:
         name_budget = max(3, max_width - base_w - 1)
         return _build(model_name[:name_budget] + '…', rate_pct)
 
-    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str, subagents: list[tuple[str, str]] | None = None) -> str:
+    def model_right_section(self, model_name: str, model_thinking: str, rate_limits: RateLimits, effort_level: str = '', fast_mode: bool = False) -> tuple[str, str, int]:
+        step      = rainbow_step()
+        c_think   = rainbow_at(step, 0)
+        c_helper  = rainbow_at(step, 9)
+        model_clr = self.model_colour(model_name)
+        pct       = self._model_bg_pct(effort_level)
+        glyph     = GLYPH_FAST if fast_mode else GLYPH_THINKING
+
+        if pct:
+            anchor, shift = self._model_anchor_pair(model_name)
+            cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+            cells.append((GLYPH_MODEL,    anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            for ch in model_name:
+                cells.append((ch, anchor, False, False))
+            cells.append((' ',            anchor, False, False))
+            cells.append((glyph,          anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            cells.append((' ',            anchor, True,  False))
+            for ch in model_thinking:
+                cells.append((ch, anchor, False, True))
+            cells.append((' ', anchor, False, False))
+            pill_l    = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct) + PILL_LEFT
+            pill_r    = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct) + PILL_RIGHT
+            right_text = pill_l + paint_bg_span(cells, anchor, shift, pct, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
+        elif model_thinking:
+            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R} {c_think}{BOLD}{glyph}  {self.R}{model_clr}{ITALIC}{model_thinking}{RESET}'
+        else:
+            right_text = f'{model_clr}{GLYPH_MODEL}  {model_name}{self.R}'
+
+        right_w = _visible_width(right_text)
+
+        helper_text = f'{c_helper}{BOLD}{GLYPH_HELPER}{self.R}  {self.white_brt}{BOLD}{self.helper(rate_limits.five_hour)}{self.R}'
+        seven_day = rate_limits.seven_day
+        if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
+            seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
+            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
+
+        return helper_text, right_text, right_w
+
+    def model_right_section_compact(self, model_name: str, rate_limits: RateLimits, max_right_width: int, effort_level: str = '') -> tuple[str, str, int]:
+        model_clr = self.model_colour(model_name)
+        pct_bg    = self._model_bg_pct(effort_level)
+        anchor, shift = self._model_anchor_pair(model_name) if pct_bg else ((0, 0, 0), (0, 0, 0))
+        pct       = rate_limits.five_hour.used_percentage or 0
+        pct_clr   = self.fill_colour(float(pct))
+        rate_text = f'{pct_clr}{pct}%{self.R}'
+        try:
+            if rate_limits.five_hour.resets_at:
+                resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
+                delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
+                if delta.total_seconds() > 0:
+                    total_s = int(delta.total_seconds())
+                    h, rem  = divmod(total_s, 3600)
+                    m       = rem // 60
+                    time_str = f'{h}h{m}m' if h else f'{m}m'
+                    rate_text = f'{rate_text} {self.COMMIT}{time_str}{self.R}'
+        except Exception:
+            pass
+
+        def _make_right(name: str) -> tuple[str, int]:
+            if pct_bg:
+                cells: list[tuple[str, tuple[int, int, int] | None, bool, bool]] = []
+                cells.append((GLYPH_MODEL, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                for ch in name:
+                    cells.append((ch, anchor, False, False))
+                cells.append((' ', anchor, False, False))
+                pill_l  = pill_gradient_fg(0, 0, len(cells), anchor, shift, pct_bg) + PILL_LEFT
+                pill_r  = pill_gradient_fg(len(cells), 0, len(cells), anchor, shift, pct_bg) + PILL_RIGHT
+                painted = pill_l + paint_bg_span(cells, anchor, shift, pct_bg, self.pill_fg_dark, self.pill_fg_light) + pill_r + RESET
+                return painted, _visible_width(painted)
+            text = f'{model_clr}{GLYPH_MODEL}  {name}{self.R}'
+            return text, _visible_width(text)
+
+        right_text, right_w = _make_right(model_name)
+        if right_w > max_right_width and max_right_width > 0:
+            _, base_w = _make_right('')
+            budget    = max(3, max_right_width - base_w - 1)
+            right_text, right_w = _make_right(model_name[:budget] + '…')
+        return rate_text, right_text, right_w
+
+    def plugins_skills(self, skills_count: int, skills_names: str, plugin_names: str) -> str:
         step = rainbow_step()
         c_skills = rainbow_at(step, 3)
         c_plugins = rainbow_at(step, 6)
-        c_subagent = rainbow_at(step, 12)
         extras = []
         if skills_count > 0:
-            extras.append(f'{c_skills}{BOLD}󰟟  {self.R}{self.SKILLS}{skills_names}{self.R}')
+            extras.append(f'{c_skills}{BOLD}{GLYPH_SKILLS}  {self.R}{self.SKILLS}{skills_names}{self.R}')
         if plugin_names:
-            extras.append(f'{c_plugins}{BOLD}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
-        if subagents:
-            names = ','.join((_short_agent_name(t, d)) for t, d in subagents)
-            extras.append(f'{c_subagent}{BOLD}  {self.R}{CLR_PEACH}{names}{self.R}')
+            extras.append(f'{c_plugins}{BOLD}{GLYPH_PLUGINS}  {self.R}{self.SKILLS}{plugin_names}{self.R}')
         return f' {self.LABEL}|{self.R} '.join(extras)
+
+    SUBAGENT_TOK_W = 6  # fmt_tok('999.9K') is 6 chars; reserve to avoid jitter
+
+    def subagent_row(self, sub: RunningSubagent, width: int) -> str:
+        now    = time.time()
+        dur    = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
+        bin_s  = fmt_tok(sub.billed_in).rjust(self.SUBAGENT_TOK_W)
+        out_s  = fmt_tok(sub.output).rjust(self.SUBAGENT_TOK_W)
+        dur_s  = fmt_dur(dur).rjust(5)
+
+        right_text = (
+            f'{self.LABEL}{BOLD}↓{self.R}{self.CTX}{bin_s}{self.R}'
+            f' {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
+            f'   {self.CTX}{dur_s}{self.R}'
+        )
+        right_w = _visible_width(right_text)
+
+        step      = rainbow_step()
+        c_marker  = rainbow_at(step, 12)
+        type_text = sub.agent_type or '?'
+        desc_text = sub.description or ''
+
+        target_w = width - 4  # leave 1 col gap before the right │, matching sibling rows
+        head_w   = 3 + len(type_text) + 3  # '▶  ' + type + ' · '
+        budget   = max(0, target_w - head_w - 1 - right_w)
+        if len(desc_text) > budget:
+            desc_text = (desc_text[:budget - 1] + '…') if budget > 0 else ''
+
+        left_text = (
+            f'{c_marker}{BOLD}{GLYPH_SUBAGENT_ROW}{self.R}  '
+            f'{self.SKILLS}{type_text}{self.R}'
+            f' {self.LABEL}·{self.R} '
+            f'{self.CTX}{desc_text}{self.R}'
+        )
+        left_w = head_w + len(desc_text)
+        pad_w  = max(1, target_w - left_w - right_w)
+        return f'{left_text}{" " * pad_w}{right_text}'
+
+    def task_row(self, tasks: TaskList, width: int, compact: bool = False) -> str:
+        step    = rainbow_step()
+        c_glyph = rainbow_at(step, 9)
+        done    = tasks.completed
+        total   = tasks.total
+        count_s = f'{done}/{total}'
+
+        head = f'{c_glyph}{BOLD}{GLYPH_TASKS}{self.R}  {self.SKILLS}{count_s}{self.R}'
+        if compact:
+            return head
+
+        if done == total:
+            text = ''
+        else:
+            active = tasks.active
+            if active is not None:
+                text = active.active_form or active.subject
+            else:
+                nxt = tasks.next_pending
+                text = nxt.subject if nxt else ''
+
+        if not text:
+            return head
+
+        target_w = width - 4
+        head_w   = 3 + len(count_s) + 2  # glyph + '  ' + count + '  '
+        budget   = max(0, target_w - head_w)
+        if len(text) > budget:
+            text = (text[:budget - 1] + '…') if budget > 0 else ''
+        return f'{head}  {self.CTX}{text}{self.R}'
 
     RATE_W  = 6
     IN_W    = 6
     CACHE_W = 6
     OUT_W   = 6
 
-    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80) -> str:
+    def tokens_cost(self, sess_in: int, sess_cache: int, sess_out: int, day_in: int, day_cache: int, day_out: int, sess_cost: float, day_cost: float, tok_rate: int, session_id: str = '', box_width: int = 80, fill: float = 1.0) -> str:
         day_clr = self.day_cost_colour(day_cost)
+        in_active, out_active = TokenRate.recently_active(session_id)
+        in_icon  = '\U0001f847 ' if in_active  else '↓ '  # 🡇+space or ↓+space (both 2 cols)
+        out_icon = '\U0001f845 ' if out_active else '↑ '  # 🡅+space or ↑+space (both 2 cols)
 
         sess_in_s    = fmt_tok(sess_in).rjust(self.IN_W)
         day_in_s     = fmt_tok(day_in).rjust(self.IN_W)
@@ -1437,45 +2015,59 @@ class Renderer:
         sess_out_s   = fmt_tok(sess_out).rjust(self.OUT_W)
         day_out_s    = fmt_tok(day_out).rjust(self.OUT_W)
 
-        rate_s = fmt_tok(tok_rate).rjust(self.RATE_W)
+        vsep_w        = 4
+        vsep_leader_w = 4
 
-        vsep    = f'  {self.BORDER}│{self.R}  '
-        vsep_w  = 5
-
-        middle1 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{sess_out_s}{self.R}'
-        middle2 = f'{self.LABEL}{self.BOLDY}↓ {self.R}{self.TOK}{day_in_s}{self.R} {self.TOK_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}↑ {self.R}{self.TOK}{day_out_s}{self.R}'
+        middle1 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK}{sess_in_s}{self.R} {self.TOK_DIM}({sess_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK}{sess_out_s}{self.R}'
+        middle2 = f'{self.LABEL}{self.BOLDY}{in_icon}{self.R}{self.TOK_DAY}{day_in_s}{self.R} {self.TOK_DAY_DIM}({day_cache_s}){self.R}{self.LABEL} {self.BOLDY}{out_icon}{self.R}{self.TOK_DAY}{day_out_s}{self.R}'
 
         cost1 = f'${sess_cost:,.2f}'
         cost2 = f'${day_cost:,.2f}'
         cost_width = max(_visible_width(cost1), _visible_width(cost2))
 
-        end1 = f'{CLR_GREEN_OK}{ICON_COST} {self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
-        end2 = f'   {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
+        end1 = f'{self.safe}{ICON_COST}{self.R} {self.COST}{cost1.rjust(cost_width)}{self.R}'
+        end2 = f'  {self.LABEL}{self.R}{day_clr}{cost2.rjust(cost_width)}{self.R}'
 
+        label_w = 15
         w_middle = _visible_width(middle1)
         w_end    = max(_visible_width(end1), _visible_width(end2))
         content_w = box_width - 3
-        leader_w = max(11, content_w - w_middle - w_end - vsep_w * 2)
+        leader_w = max(label_w + 1, content_w - w_middle - w_end - vsep_w - vsep_leader_w)
 
-        rate_label = f'{CLR_YELLOW_BRT}{ICON_TOK_RATE}  {self.TOK}{rate_s}{self.R}{self.LABEL} t/m{self.R}'
+        col1 = w_middle + 5                  # 1-indexed position of vsep │
+        col2 = w_middle + vsep_w + w_end + 5  # 1-indexed position of vsep_leader │
+        vsep        = self.vsep_block(col1, box_width, fill=fill, leader=True)
+        vsep_leader = self.vsep_block(col2, box_width, fill=fill, leader=True)
+        # bar_w = leader_w - label_w
+
+        rate_label = f'{self.TOK_ICON}{ICON_TOK_RATE} {self.TOK}{fmt_tok(tok_rate)}{self.R}{self.LABEL} t/m{self.R}'
         rate_label_w = _visible_width(rate_label)
-        pad_left = max(0, (leader_w - rate_label_w) // 2)
-        pad_right = max(0, leader_w - rate_label_w - pad_left)
-        leader1 = f'{" " * pad_left}{rate_label}{" " * pad_right}'
+        rate_label_padded = f'{rate_label}' #{" " * max(0, label_w - rate_label_w)}'
+        bar_w = leader_w - rate_label_w
 
-        if session_id:
-            spark_history = TokenRate.history(session_id, leader_w, TokenRate.WINDOW * 2)
-            leader2 = self.sparkline(spark_history[::-1])
+        if bar_w <= 0:
+            leader1 = rate_label_padded
+            leader2 = ' ' * label_w
         else:
-            leader2 = ' ' * leader_w
+            if session_id:
+                spark_history = TokenRate.history(session_id, bar_w, TokenRate.WINDOW * 2)
+                top_row, bot_row = self.sparkline(spark_history[::-1], live=True)
+            else:
+                top_row, bot_row = ' ' * bar_w, ' ' * bar_w
+            leader1 = f'{rate_label_padded}{top_row}'
+            # leader2 = f'{" " * label_w}{bot_row}'
+            leader2 = f'{" " * rate_label_w}{bot_row}'
 
-        col1 = w_middle + vsep_w
-        col2 = w_middle + w_end + vsep_w * 2
+        # 1-indexed column of the WINDOW (60s) tick inside the sparkline. History
+        # spans WINDOW*2 (=120s) across bar_w buckets reversed so index 0 is "now",
+        # which puts the 60s boundary at bar_w // 2. col2 is the vsep_leader │
+        # column; sparkline starts rate_label_w cells past that.
+        mark_col = col2 + rate_label_w + (bar_w // 2) if bar_w > 0 else 0
 
         return [
-            f'{middle1}{vsep}{end1}{vsep}{leader1}',
-            f'{middle2}{vsep}{end2}{vsep}{leader2}',
-        ], (col1, col2)
+            f'{middle1}{vsep}{end1}{vsep_leader}{leader1}',
+            f'{middle2}{vsep}{end2}{vsep_leader}{leader2}',
+        ], (col1, col2), mark_col
 
     def context_bar(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
@@ -1483,21 +2075,49 @@ class Renderer:
         bar_filled = BarChars.FILLED * filled
         bar_empty = BarChars.EMPTY * (30 - filled)
         if ratio >= 0.9:
-            color = CLR_ALERT
+            color = self.alert
         elif ratio >= 0.7:
-            color = CLR_WARN
+            color = self.warn
         else:
-            color = CLR_GREEN_OK
+            color = self.safe
         return f'{color}{bar_filled}{self.R}{self.BAR_EMPTY}{bar_empty}{self.R}'
 
     def context_bar_color(self, fill_ratio: float) -> str:
         ratio = min(max(fill_ratio, 0.0), 1.0)
         if ratio >= 0.9:
-            return CLR_ALERT
+            return self.alert
         elif ratio >= 0.7:
-            return CLR_WARN
+            return self.warn
         else:
-            return CLR_GREEN_OK
+            return self.safe
+
+    _EMPTY_FADE_256 = re.compile(r'\x1b\[38;5;(\d+)m')
+    _EMPTY_FADE_RGB = re.compile(r'\x1b\[38;2;(\d+);(\d+);(\d+)m')
+
+    def _empty_fade_colors(self) -> list[str]:
+        # 3-step ramp going from a darker shade up to BAR_EMPTY, so the fill→empty
+        # seam blends instead of butting a coloured glyph against flat grey.
+        m = self._EMPTY_FADE_256.search(self.BAR_EMPTY)
+        if m:
+            n = int(m.group(1))
+            return [f'\033[38;5;{max(232, n - k)}m' for k in (6, 4, 2)]
+        m = self._EMPTY_FADE_RGB.search(self.BAR_EMPTY)
+        if m:
+            r, g, b = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return [f'\033[38;2;{int(r*k)};{int(g*k)};{int(b*k)}m' for k in (0.3, 0.5, 0.7)]
+        return [self.BAR_EMPTY] * 3
+
+    def _empty_section(self, empty: int, blend: bool = True) -> str:
+        if empty <= 0:
+            return ''
+        if not blend:
+            return f'{self.BAR_EMPTY}{BarChars.EMPTY * empty}'
+        fade  = self._empty_fade_colors()
+        n     = min(len(fade), empty)
+        parts = [f'{fade[i]}{BarChars.EMPTY}' for i in range(n)]
+        if empty > n:
+            parts.append(f'{self.BAR_EMPTY}{BarChars.EMPTY * (empty - n)}')
+        return ''.join(parts)
 
     def context_line(self, ctx: ContextWindow, available: int = 76) -> str:
         total_tokens = ctx.total_input_tokens + ctx.total_output_tokens
@@ -1505,7 +2125,7 @@ class Renderer:
         pct_soft     = total_tokens / SOFT_LIMIT * 100
 
         if total_tokens >= SOFT_LIMIT:
-            a = BOLD + CLR_ALERT
+            a = BOLD + self.alert
             secondary = ''
             if ctx.context_window_size > 0:
                 pct_model = total_tokens / ctx.context_window_size * 100
@@ -1526,7 +2146,7 @@ class Renderer:
         bar_w  = max(4, available - _visible_width(prefix) - 3)
         filled = int(fill_ratio * bar_w)
         empty  = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        bar    = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f'{bar_clr}{self.R} {prefix}{bar}'
 
 
@@ -1536,7 +2156,7 @@ class Renderer:
         pct_soft     = total_tokens / SOFT_LIMIT * 100
 
         if total_tokens >= SOFT_LIMIT:
-            a      = BOLD + CLR_ALERT
+            a      = BOLD + self.alert
             prefix = f'{a}{pct_soft:.0f}%{self.R} '
             bar_w  = max(4, available - _visible_width(prefix) - 3)
             filled = int(min(fill_ratio, 1.0) * bar_w)
@@ -1549,41 +2169,50 @@ class Renderer:
         bar_w   = max(4, available - _visible_width(prefix) - 3)
         filled  = int(fill_ratio * bar_w)
         empty   = max(0, bar_w - filled - (1 if filled < bar_w else 0))
-        bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self.BAR_EMPTY}{BarChars.EMPTY * empty}{self.R}'
+        bar     = f'{self.gradient_bar(filled, bar_w)}{self.R}{self._empty_section(empty, blend=filled > 0)}{self.R}'
         return f' {prefix}{bar}'
 
     SPEC_GRADIENTS = [
-        ((20, 60, 200), (20, 180, 240), (100, 240, 255)),       # Ocean
-        ((200, 80, 10), (245, 30, 100), (255, 160, 80)),        # Sunset
-        ((10, 120, 40), (80, 210, 20), (200, 255, 60)),         # Forest
-        ((80, 20, 200), (160, 60, 255), (220, 160, 255)),       # Lavender
-        ((160, 20, 10), (240, 120, 10), (255, 220, 30)),        # Ember
-        ((20, 80, 160), (60, 180, 240), (210, 240, 255)),       # Arctic
-        ((120, 50, 10), (200, 120, 20), (255, 200, 80)),        # Copper
-        ((160, 10, 50), (240, 60, 130), (255, 180, 210)),       # Rose
-        ((10, 110, 90), (20, 210, 150), (120, 255, 200)),       # Mint
-        ((50, 10, 160), (180, 20, 220), (255, 100, 240)),       # Nebula
-        ((140, 10, 180), (40, 100, 255), (20, 220, 200)),       # Aurora
-        ((200, 160, 10), (240, 80, 20), (180, 20, 80)),         # Volcano
+        ((20, 60, 200),  (30, 200, 180),  (220, 255, 120)),     # Ocean    blue → teal → pale green
+        ((60, 20, 160),  (240, 60, 140),  (255, 200, 60)),      # Sunset   indigo → magenta → gold
+        ((10, 80, 120),  (120, 220, 40),  (240, 240, 60)),      # Forest   navy → lime → yellow
+        ((80, 20, 200),  (240, 100, 220), (255, 200, 160)),     # Lavender purple → hot-pink → peach
+        ((140, 20, 30),  (240, 120, 20),  (255, 230, 80)),      # Ember    dark-red → orange → yellow
+        ((30, 40, 140),  (60, 200, 240),  (220, 240, 255)),     # Arctic   navy → cyan → white
+        ((90, 30, 10),   (220, 120, 30),  (255, 220, 100)),     # Copper   brown → orange → gold
+        ((160, 10, 50),  (240, 100, 160), (255, 220, 220)),     # Rose     wine → pink → cream
+        ((10, 90, 100),  (60, 220, 160),  (220, 255, 180)),     # Mint     dark-teal → mint → pale-yellow
+        ((40, 10, 140),  (220, 40, 200),  (60, 220, 240)),      # Nebula   violet → magenta → cyan
+        ((140, 30, 200), (40, 180, 240),  (60, 230, 120)),      # Aurora   violet → cyan → green
+        ((60, 0, 20),    (220, 60, 20),   (255, 220, 40)),      # Volcano  black-red → orange → yellow
     ]
 
-    def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
-        if filled <= 0:
-            return ''
+    SPEC_MID_MIN_WIDTH = 20
+
+    def _spec_rgb_at(self, t: float, idx: int, three_stops: bool = True) -> tuple[int, int, int]:
         stops = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)]
+        if not three_stops:
+            stops = (stops[0], stops[-1])
         n = len(stops)
-        denom = max(1, filled - 1)
+        seg = max(0.0, min(1.0, t)) * (n - 1)
+        s0 = min(int(seg), n - 2)
+        s1 = s0 + 1
+        u = seg - s0
+        c0, c1 = stops[s0], stops[s1]
+        return (
+            int(c0[0] + (c1[0] - c0[0]) * u),
+            int(c0[1] + (c1[1] - c0[1]) * u),
+            int(c0[2] + (c1[2] - c0[2]) * u),
+        )
+
+    def spec_gradient_bar(self, filled: int, bar_w: int, idx: int) -> str:
+        if filled <= 0 or bar_w <= 0:
+            return ''
+        denom = max(1, bar_w - 1)
+        three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
         parts = []
         for i in range(filled):
-            t = i / denom if denom > 0 else 0.0
-            seg = t * (n - 1)
-            s0 = min(int(seg), n - 2)
-            s1 = s0 + 1
-            u = seg - s0
-            c0, c1 = stops[s0], stops[s1]
-            r = int(c0[0] + (c1[0] - c0[0]) * u)
-            g = int(c0[1] + (c1[1] - c0[1]) * u)
-            b = int(c0[2] + (c1[2] - c0[2]) * u)
+            r, g, b = self._spec_rgb_at(i / denom, idx, three_stops)
             parts.append(f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}')
         return ''.join(parts)
 
@@ -1600,14 +2229,16 @@ class Renderer:
 
         bar_filled = self.spec_gradient_bar(filled, bar_w, idx)
         if filled > 0 and empty > 0:
-            c_last = self.SPEC_GRADIENTS[idx % len(self.SPEC_GRADIENTS)][-1]
-            r, g, b = int(c_last[0] * 0.45), int(c_last[1] * 0.45), int(c_last[2] * 0.45)
+            denom = max(1, bar_w - 1)
+            three_stops = bar_w >= self.SPEC_MID_MIN_WIDTH
+            cr, cg, cb = self._spec_rgb_at(filled / denom, idx, three_stops)
+            r, g, b = int(cr * 0.45), int(cg * 0.45), int(cb * 0.45)
             bar_filled += f'\033[38;2;{r};{g};{b}m{BarChars.HEAVY}'
             empty -= 1
-        bar_empty = f'\033[38;5;233m{BarChars.HEAVY * empty}\033[0m'
+        bar_empty = f'{self.spec_empty_ansi}{BarChars.HEAVY * empty}\033[0m'
 
         return (
-            f'{self.LABEL}{ITALIC}{title}{RESET}{self.R} '
+            f'{CLR_WHITE_BRT}{ITALIC}{title}{RESET}{self.R} '
             f'{bar_filled}{self.R}{bar_empty}'
             f' {self.LABEL}{done}/{total}{self.R} {BOLD}{pct:>3d}%{RESET}'
         )
@@ -1640,6 +2271,7 @@ class RowSpec:
     downs: tuple[int, ...] = ()
     pill: Pill | None = None
     pill_edge: str = 'bottom'
+    right_pill: str = ''
 
 
 @dataclass
@@ -1656,22 +2288,39 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
-    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
+    pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0, 0, 0), (0, 0, 0))
 
-    line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 1 if pill_pct else width - 3, effort_for_bg)
+    max_right    = max(8, width // 2)
+    rate_text, right_text, right_w = r.model_right_section_compact(
+        session.model_name, session.rate_limits, max_right, effort_for_bg,
+    )
     line_context = r.context_line_compact(ctx, width - 3)
-    pill = Pill(start=1, end=pill_w, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
+
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
 
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
-    spec.rows = [
-        RowSpec('top_border', pill=pill),
-        RowSpec('content', content=line_model, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
-        RowSpec('separator_dim', pill=pill),
-        RowSpec('content', content=line_context),
-        RowSpec('bottom_border'),
-    ]
+    if pill_pct:
+        spec.rows = [
+            RowSpec('top_border', pill=pill),
+            RowSpec('content', content=rate_text, right_pill=right_text),
+            RowSpec('separator_dim', pill=pill),
+            RowSpec('content', content=line_context),
+            RowSpec('bottom_border'),
+        ]
+    else:
+        rate_w = _visible_width(rate_text)
+        pad    = max(1, (width - 4) - rate_w - right_w)
+        full   = f'{rate_text}{" " * pad}{right_text}'
+        spec.rows = [
+            RowSpec('top_border'),
+            RowSpec('content', content=full),
+            RowSpec('separator_dim'),
+            RowSpec('content', content=line_context),
+            RowSpec('bottom_border'),
+        ]
     return spec
 
 
@@ -1681,43 +2330,50 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     fill         = min(total_tokens / SOFT_LIMIT, 1.0)
 
     effort_for_bg = session.effort.level if session.thinking.enabled else ''
-    bg_lead       = r.model_bg_lead(session.model_name, effort_for_bg)
     pill_pct      = r._model_bg_pct(effort_for_bg)
     pill_anchor, pill_shift = r._model_anchor_pair(session.model_name) if pill_pct else ((0,0,0), (0,0,0))
 
     git          = GitInfo.from_cwd(session.cwd)
-    line_path    = r.path_git_compact(session.short_pwd, git)
-    line_model, pill_w = r.model_section_compact(session.model_name, session.rate_limits, width - 3, effort_for_bg)
     line_context = r.context_line_compact(ctx, width - 3)
 
-    spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
-    combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
+    max_right    = max(8, width // 2)
+    rate_text, right_text, right_w = r.model_right_section_compact(
+        session.model_name, session.rate_limits, max_right, effort_for_bg,
+    )
 
-    if combined is not None:
-        combined_line, div_col = combined
-        pill = Pill(start=div_col, end=div_col + pill_w - 1, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
-        spec.rows = [
-            RowSpec('top_border', downs=() if pill_w else (div_col,), pill=pill),
-            RowSpec('content', content=combined_line),
-            RowSpec('separator_dim', ups=() if pill_w else (div_col,), pill=pill),
-            RowSpec('content', content=line_context),
-            RowSpec('bottom_border'),
-        ]
+    spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
+
+    vsep_w   = 5
+    rate_w   = _visible_width(rate_text)
+    target_w = (width - 4) - vsep_w - rate_w - right_w
+    line_path = r.fit_path(session.short_pwd, git, '', target_w, compact_only=True)
+    path_w   = _visible_width(line_path)
+
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
+
+    path_div_col = 3 + path_w + 2
+    vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
+    content = f'{line_path}{vsep}{rate_text}'
+    if pill_pct:
+        top_row     = RowSpec('top_border', downs=(path_div_col,), pill=pill)
+        content_row = RowSpec('content', content=content, right_pill=right_text)
+        sep_row     = RowSpec('separator_dim', ups=(path_div_col,), pill=pill)
     else:
-        pill = Pill(start=1, end=pill_w, anchor=pill_anchor, shift=pill_shift, pct=pill_pct) if pill_w else None
-        rows: list[RowSpec] = [
-            RowSpec('top_border'),
-            RowSpec('content', content=line_path),
-        ]
-        if pill:
-            rows.append(RowSpec('separator_dim', pill=pill, pill_edge='top'))
-        rows += [
-            RowSpec('content', content=line_model, bg_lead='' if pill_w else bg_lead, pill_flush=bool(pill_w)),
-            RowSpec('separator_dim', pill=pill),
-            RowSpec('content', content=line_context),
-            RowSpec('bottom_border'),
-        ]
-        spec.rows = rows
+        pad = max(1, (width - 3) - (path_w + vsep_w + rate_w + right_w))
+        full = f'{content}{" " * pad}{right_text}'
+        top_row     = RowSpec('top_border', downs=(path_div_col,))
+        content_row = RowSpec('content', content=full)
+        sep_row     = RowSpec('separator_dim', ups=(path_div_col,))
+    tasks = TaskList.from_session(session.transcript_path)
+    rows: list[RowSpec] = [top_row, content_row, sep_row]
+    if tasks.is_visible():
+        rows.append(RowSpec('content', content=r.task_row(tasks, width, compact=True)))
+        rows.append(RowSpec('separator_dim'))
+    rows.append(RowSpec('content', content=line_context))
+    rows.append(RowSpec('bottom_border'))
+    spec.rows = rows
     return spec
 
 
@@ -1741,18 +2397,22 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     sess_cost     = compute_session_cost(session.model, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
+    tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
     git          = GitInfo.from_cwd(session.cwd)
-    line_path    = r.path_git(session.short_pwd, git, elapsed)
-    line_model, model_div_offset = r.model_section(session.model_name, session.model_thinking, session.rate_limits, session.effort.level if session.thinking.enabled else '')
-    line_tokens, vsep_cols = r.tokens_cost(
+    helper_text, right_text, right_w = r.model_right_section(
+        session.model_name, session.model_thinking, session.rate_limits,
+        session.effort.level if session.thinking.enabled else '',
+        fast_mode=session.fast_mode,
+    )
+    line_tokens, vsep_cols, spark_mark_col = r.tokens_cost(
         usage.billed_in, usage.cache_read, usage.out,
         token_log.day_in, token_log.day_cache_read, token_log.day_out,
         sess_cost, day_cost, tok_rate,
-        session.session_id, width,
+        session.session_id, width, fill,
     )
-    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins, subagents.subagents or None)
+    plugins_line = r.plugins_skills(len(skills.names), skill_display, session.workspace.plugins)
     changes      = OpenSpec.from_cwd(session.cwd).changes
     title_cap    = max(10, width - 45)
     title_w      = min(40, title_cap, max((len(n) for n, _, _ in changes), default=25))
@@ -1763,45 +2423,32 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     spec = LayoutSpec(width=width, fill=fill, session_id=session.session_id)
     rows: list[RowSpec] = []
 
-    pill_w_wide = model_div_offset if pill_pct else 0
-    combined = r.path_model_row(line_path, line_model, width, pill_active=bool(pill_pct))
+    vsep_w   = 5
+    helper_w = _visible_width(helper_text)
+    target_w = (width - 4) - vsep_w - helper_w - right_w
+    line_path = r.fit_path(session.short_pwd, git, elapsed, target_w, compact_only=False)
+    path_w   = _visible_width(line_path)
 
-    if combined is not None:
-        combined_line, top_div_col = combined
-        if pill_w_wide:
-            pill = Pill(start=top_div_col, end=top_div_col + pill_w_wide - 1, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
-            rows += [
-                RowSpec('top_border', downs=(), pill=pill),
-                RowSpec('content', content=combined_line),
-            ]
-            next_ups: tuple[int, ...] = ()
-        else:
-            model_div_col = top_div_col + 3 + model_div_offset
-            pill = None
-            rows += [
-                RowSpec('top_border', downs=(top_div_col, model_div_col)),
-                RowSpec('content', content=combined_line, bg_trail=bg_trail),
-            ]
-            next_ups = (top_div_col, model_div_col)
+    pill: Pill | None = None
+    if pill_pct:
+        pill = Pill(start=width - right_w + 1, end=width, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
+
+    path_div_col = 3 + path_w + 2
+    vsep = r.vsep_block(path_div_col, width, fill=fill, leader=True)
+    content = f'{line_path}{vsep}{helper_text}'
+    if pill_pct:
+        rows += [
+            RowSpec('top_border', downs=(path_div_col,), pill=pill),
+            RowSpec('content', content=content, right_pill=right_text),
+        ]
     else:
-        if pill_w_wide:
-            pill = Pill(start=1, end=pill_w_wide, anchor=pill_anchor, shift=pill_shift, pct=pill_pct)
-            rows += [
-                RowSpec('top_border'),
-                RowSpec('content', content=line_path),
-                RowSpec('separator_dim', pill=pill, pill_edge='top'),
-                RowSpec('content', content=line_model, pill_flush=True),
-            ]
-            next_ups = ()
-        else:
-            model_div_col = 3 + model_div_offset
-            pill = None
-            rows += [
-                RowSpec('top_border'),
-                RowSpec('content', content=line_path),
-                RowSpec('content', content=line_model, bg_lead=bg_lead, bg_trail=bg_trail),
-            ]
-            next_ups = (model_div_col,)
+        pad = max(1, (width - 3) - (path_w + vsep_w + helper_w + right_w))
+        content_full = f'{content}{" " * pad}{right_text}'
+        rows += [
+            RowSpec('top_border', downs=(path_div_col,)),
+            RowSpec('content', content=content_full),
+        ]
+    next_ups: tuple[int, ...] = (path_div_col,)
 
     if plugins_line:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
@@ -1811,8 +2458,18 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     else:
         rows.append(RowSpec('separator_dim', ups=next_ups, pill=pill))
 
+    if tasks.is_visible():
+        rows.append(RowSpec('content', content=r.task_row(tasks, width)))
+        rows.append(RowSpec('separator_dim'))
+
+    if subagents.subagents:
+        for sub in subagents.subagents:
+            rows.append(RowSpec('content', content=r.subagent_row(sub, width)))
+        rows.append(RowSpec('separator_dim'))
+
     rows.append(RowSpec('content', content=line_context))
-    rows.append(RowSpec('separator_dim', downs=vsep_cols))
+    tokens_downs = vsep_cols + ((spark_mark_col,) if spark_mark_col else ())
+    rows.append(RowSpec('separator_dim', downs=tokens_downs))
     for lt in line_tokens:
         rows.append(RowSpec('content', content=lt))
 
@@ -1840,12 +2497,29 @@ def render_layout(spec: LayoutSpec, r: Renderer) -> list[str]:
         elif row.kind == 'separator_dim':
             lines.append(r.border_separator_dim(spec.width, downs=row.downs, ups=row.ups, fill=spec.fill, pill=row.pill, pill_edge=row.pill_edge))
         elif row.kind == 'content':
-            lines.append(r.border_line(row.content, spec.width, fill=spec.fill, bg_lead=row.bg_lead, bg_trail=row.bg_trail, pill_flush=row.pill_flush))
+            lines.append(r.border_line(row.content, spec.width, fill=spec.fill, bg_lead=row.bg_lead, bg_trail=row.bg_trail, pill_flush=row.pill_flush, right_pill=row.right_pill))
     return lines
 
 
+def resolve_theme(cli_name: str | None) -> Theme:
+    """Layered theme selection: CLI → env → config file → CLAUDE_DARK."""
+    if cli_name and cli_name in THEMES:
+        return THEMES[cli_name]
+    env = os.environ.get('CLAUDE_STATUSLINE_THEME', '').strip()
+    if env in THEMES:
+        return THEMES[env]
+    try:
+        cfg = (HOME / '.claude' / 'statusline-theme').read_text().strip()
+        if cfg in THEMES:
+            return THEMES[cfg]
+    except OSError:
+        pass
+    return CLAUDE_DARK
+
+
 def main() -> None:
-    bg_shift = 'warm'
+    bg_shift   = 'warm'
+    theme_name: str | None = None
     args = sys.argv[1:]
     while args:
         a = args.pop(0)
@@ -1857,10 +2531,15 @@ def main() -> None:
             v = a.split('=', 1)[1].lower()
             if v in ('warm', 'cool'):
                 bg_shift = v
+        elif a == '--theme' and args:
+            theme_name = args.pop(0)
+        elif a.startswith('--theme='):
+            theme_name = a.split('=', 1)[1]
 
     info    = json.loads(sys.stdin.read())
     session = SessionInfo.from_dict(info)
-    r       = Renderer(bg_shift=bg_shift)
+    theme   = resolve_theme(theme_name)
+    r       = Renderer(bg_shift=bg_shift, theme=theme)
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:

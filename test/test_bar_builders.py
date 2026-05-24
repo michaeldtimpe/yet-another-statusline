@@ -1,13 +1,10 @@
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 
 _r = sl.Renderer()
 
 
-# ---------------------------------------------------------------------------
-# 7.2  gradient_bar
-# ---------------------------------------------------------------------------
 
 def test_gradient_bar_zero_fill_is_empty() -> None:
     assert _r.gradient_bar(0, 30) == ''
@@ -20,9 +17,28 @@ def test_gradient_bar_visible_width() -> None:
     assert sl._visible_width(stripped) == 6
 
 
-# ---------------------------------------------------------------------------
-# 7.3  spec_gradient_bar: idx wraps modulo palette length
-# ---------------------------------------------------------------------------
+def test_gradient_bar_mid_glyph_has_no_background() -> None:
+    # The MID leading-edge glyph used to sit on a coloured BG to fake a pill cap.
+    # The fill→empty seam is now blended by fading the leading empty chars, so
+    # gradient_bar must not emit any BG SGR.
+    result = _r.gradient_bar(5, 30)
+    assert '\x1b[48;' not in result
+
+
+def test_empty_section_fades_leading_chars() -> None:
+    # First 3 empty chars ramp from a darker shade up to BAR_EMPTY; remainder
+    # share BAR_EMPTY. Smaller `empty` only emits the ramp prefix.
+    full = _r._empty_section(10)
+    fade = _r._empty_fade_colors()
+    for step in fade:
+        assert step in full
+    assert _r.BAR_EMPTY in full
+    assert strip_ansi(full) == sl.BarChars.EMPTY * 10
+    assert _r._empty_section(0) == ''
+    short = strip_ansi(_r._empty_section(2))
+    assert short == sl.BarChars.EMPTY * 2
+
+
 
 def test_spec_gradient_bar_idx_wraps() -> None:
     palette_len = len(sl.Renderer.SPEC_GRADIENTS)

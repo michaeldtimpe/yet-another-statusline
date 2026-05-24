@@ -5,38 +5,26 @@ import statusline_command as sl
 _r = sl.Renderer()
 
 
-# ---------------------------------------------------------------------------
-# 5.2  gradient_rgb(0.0) → (40, 210, 80)
-# ---------------------------------------------------------------------------
 
 def test_gradient_rgb_at_zero() -> None:
     assert _r.gradient_rgb(0.0) == (40, 210, 80)
 
 
-# ---------------------------------------------------------------------------
-# 5.3  gradient_rgb(1.0) and gradient_rgb(1.5) both clamp to (210, 20, 50)
-# ---------------------------------------------------------------------------
 
 def test_gradient_rgb_at_one() -> None:
-    assert _r.gradient_rgb(1.0) == (210, 20, 50)
+    assert _r.gradient_rgb(1.0) == (170, 60, 210)
 
 
 def test_gradient_rgb_clamps_above_one() -> None:
-    assert _r.gradient_rgb(1.5) == (210, 20, 50)
+    assert _r.gradient_rgb(1.5) == (170, 60, 210)
 
 
-# ---------------------------------------------------------------------------
-# 5.4  gradient_rgb(0.0, dim=0.5) → (20, 105, 40)
-# ---------------------------------------------------------------------------
 
 def test_gradient_rgb_dim() -> None:
     # int(40 * 0.5)=20, int(210 * 0.5)=105, int(80 * 0.5)=40
     assert _r.gradient_rgb(0.0, dim=0.5) == (20, 105, 40)
 
 
-# ---------------------------------------------------------------------------
-# 5.5  gradient_color(0.5) starts with '\033[38;2;' and round-trips via gradient_rgb
-# ---------------------------------------------------------------------------
 
 def test_gradient_color_format() -> None:
     color = _r.gradient_color(0.5)
@@ -52,19 +40,32 @@ def test_gradient_color_round_trips_rgb() -> None:
     assert parsed == _r.gradient_rgb(0.5)
 
 
-# ---------------------------------------------------------------------------
-# 5.6  grad_at(0, width=10, fill=1.0) == gradient_color(0.0)
-# ---------------------------------------------------------------------------
 
 def test_grad_at_start_of_full_bar() -> None:
     # col=0, width=10 → t=0/9=0.0; fill=1.0; t <= fill-FADE=0.94 → gradient_color(0.0)
     assert _r.grad_at(0, width=10, fill=1.0) == _r.gradient_color(0.0)
 
 
-# ---------------------------------------------------------------------------
-# 5.7  grad_at(9, width=10, fill=0.0) → CLR_BORDER_OFF
-# ---------------------------------------------------------------------------
 
 def test_grad_at_past_zero_fill() -> None:
     # fill=0.0 → fill <= 0 → CLR_BORDER_OFF immediately
     assert _r.grad_at(9, width=10, fill=0.0) == sl.CLR_BORDER_OFF
+
+
+# spark_rgb dim factor
+
+def test_spark_rgb_dim_half() -> None:
+    """spark_rgb(t, dim=0.5) == (int(R*0.5), int(G*0.5), int(B*0.5))."""
+    r, g, b = _r.spark_rgb(0.7)
+    assert _r.spark_rgb(0.7, dim=0.5) == (int(r * 0.5), int(g * 0.5), int(b * 0.5))
+
+
+def test_spark_rgb_dim_zero() -> None:
+    """spark_rgb(t, dim=0.0) == (0, 0, 0) for any t."""
+    assert _r.spark_rgb(0.3, dim=0.0) == (0, 0, 0)
+    assert _r.spark_rgb(0.7, dim=0.0) == (0, 0, 0)
+
+
+def test_spark_color_dim_one_matches_default() -> None:
+    """spark_color(t, dim=1.0) is byte-identical to spark_color(t)."""
+    assert _r.spark_color(0.5) == _r.spark_color(0.5, dim=1.0)

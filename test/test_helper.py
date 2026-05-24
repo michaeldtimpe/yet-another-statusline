@@ -3,7 +3,7 @@ from datetime import datetime, timezone, tzinfo
 import pytest
 
 import statusline_command as sl
-from conftest import strip_ansi
+from helper import strip_ansi
 
 _visible_width = sl._visible_width
 Renderer = sl.Renderer

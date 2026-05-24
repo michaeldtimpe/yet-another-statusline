@@ -1,6 +1,6 @@
 ---
 name: tmck-code-statusline
-description: Edit the Claude Code statusline renderer safely. Use when touching claude/statusline-command.py, claude/statusline/*.py, claude/statusline-command.sh, or related tests. Covers the layered renderer (GradientEngine / BorderRenderer / Renderer), the LayoutSpec/RowSpec layout pipeline, Nerd Font PUA glyph hazards, border/elbow column math, and the demo-based visual check.
+description: Edit the Claude Code statusline renderer safely. Use when touching claude/statusline_command.py, claude/statusline/*.py, claude/statusline-command.sh, or related tests. Covers the layered renderer (GradientEngine / BorderRenderer / Renderer), the LayoutSpec/RowSpec layout pipeline, Nerd Font PUA glyph hazards, border/elbow column math, and the demo-based visual check.
 
 ---
 
@@ -10,7 +10,7 @@ The statusline renderer is a single-pass terminal painter with hand-tuned column
 
 ## Architecture map (post-refactor)
 
-`claude/statusline-command.py` is layered:
+`claude/statusline_command.py` is layered:
 
 - **`GradientEngine`** (~L968): pure colour/sparkline math. `gradient_rgb`, `gradient_color`, `grad_at`, `gradient_bar`, `sparkline`. No I/O, no terminal state.
 - **`BorderRenderer`** (~L1045): consumes a `GradientEngine`. Owns `border_top`, `border_bottom`, `border_separator`, `border_separator_dim`, `border_line`. All elbow / pill / fill math lives here.
@@ -40,11 +40,11 @@ Run all four before editing:
            cp = ord(c)
            if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD:
                print(f'{sys.argv[1]}:{ln}  U+{cp:05X}  {c!r}')
-   " claude/statusline-command.py
+   " claude/statusline_command.py
    ```
    Any hit on a line you plan to Edit triggers the **PUA refactor rule** below.
 3. **Baseline tests**: `uv run pytest -q`. Note pass count.
-4. **Baseline demo**: `make statusline/test` (or `uv run python claude/statusline/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on $COLUMNS). For a static snapshot when piping is needed, render one frame directly: `COLUMNS=160 uv run python claude/statusline-command.py < claude/statusline/session-info-example.json` (no transcript-derived rows; enough for border math).
+4. **Baseline demo**: `make statusline/test` (or `uv run python claude/statusline/demo.py`). It animates 60 frames in place via cursor escapes; eyeball the final frame and the elbow alignment as it crosses layout thresholds (narrow → medium → wide on $COLUMNS). For a static snapshot when piping is needed, render one frame directly: `COLUMNS=160 uv run python claude/statusline_command.py < claude/statusline/session-info-example.json` (no transcript-derived rows; enough for border math).
 
 ## PUA refactor rule (mandatory before editing)
 
@@ -52,7 +52,7 @@ Nerd Font icons in this repo live in the Unicode Private Use Area (U+E000–U+F8
 
 If a line you need to Edit contains a raw PUA glyph, **hoist the glyph to a named module-level constant first**, then Edit. No exceptions.
 
-Convention (matches the existing constants near L95–L101 of `statusline-command.py`):
+Convention (matches the existing constants near L95–L101 of `statusline_command.py`):
 
 ```python
 # Nerd Font Private Use Area glyphs. Encoded as escapes so Edit, diff, and
@@ -74,7 +74,7 @@ If the line has a PUA glyph and you genuinely can't refactor first (e.g., user i
 
 ```bash
 python3 << 'PY'
-path = 'claude/statusline-command.py'
+path = 'claude/statusline_command.py'
 with open(path) as f:
     s = f.read()
 old = "...exact old text with raw glyph copied through Read...\n"

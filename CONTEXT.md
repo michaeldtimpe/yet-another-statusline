@@ -35,8 +35,43 @@ _Avoid_: "context full" — the bar can be 15% full on a 1M-context model and st
 The five discrete settings of extended thinking effort: `low`, `medium`, `high`, `xHigh`, `max`. Sourced from `effort.level` and shown only when `thinking.enabled` is true. Drives the model-row background fill: `xHigh` = 100% of the model's foreground colour, lower levels step down, `max` pushes past 100% toward saturation. See [docs/adr/0001-thinking-level-background-fill.md](docs/adr/0001-thinking-level-background-fill.md).
 _Avoid_: "thinking level" (overloaded — the *level* names a setting, the *effort* names the resource it spends).
 
-**Hue shift**:
-The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's foreground colour. Selectable via `--bg-shift {warm,cool}`. `warm` is the default.
+**Anchor**:
+The per-model identity colour that drives the left edge of the model-row pill gradient. Opus, Sonnet, Haiku, and "other" each carry their own **Anchor** in every theme, so the model is still recognisable in peripheral vision after a theme switch.
+
+**Shift**:
+The neighbour-hue endpoint on the right edge of the model-row gradient, anchored on the left at the model's **Anchor**. Each theme provides both a warm and a cool **Shift** table; `--bg-shift {warm,cool}` selects which is used. `warm` is the default.
+_Avoid_: "hue shift" (was the earlier term; **Shift** is canonical and matches the `_shift` slot names in the theme dataclass).
+
+### Theming
+
+**Theme**:
+The complete set of colour decisions the statusline draws with — decorative slots (border, path, branch, helper, label), the compaction traffic-light ladder, the rainbow border gradient stops, the per-model **Anchor** + warm/cool **Shift** tables, and the two **Pill Foreground** slots. Lives as a `Theme` dataclass instance in `claude/statusline/themes.py`. Selected at runtime via `--theme=name`, `CLAUDE_STATUSLINE_THEME`, or `~/.claude/statusline-theme` — in that priority order, falling back to `claude-dark`. See [docs/adr/0002-theme-system.md](docs/adr/0002-theme-system.md).
+_Avoid_: "palette" as a synonym (a palette is a *source* — Catppuccin Latte, Solarized Light — and a **Theme** is the fully populated dataclass derived from one).
+
+**Pill Foreground**:
+The text colour painted on top of the model-pill background. Two slots per theme: `pill_fg_dark` (used when the per-cell background luminance is above `BG_LUM_THRESHOLD`) and `pill_fg_light` (used below). Replaces the earlier rule that defaulted the foreground to the **Anchor** itself — that rule only worked because every shipped **Anchor** was bright.
+
+### Subagents
+
+**Running Subagent**:
+A subagent whose transcript jsonl was written to within the last 20 seconds. Sourced from `~/.claude/projects/<slug>/<session>/subagents/*.meta.json` paired with the sibling `.jsonl`. Drops off the statusline 20s after the subagent finishes — long enough to read a quick spawn-and-die agent's tail, short enough that a dead row doesn't linger.
+_Avoid_: "loaded subagent" (ambiguous — sounds like a config-time concept).
+
+### Task tracking
+
+**Task**:
+A checkpoint in the main agent's plan-of-work, created by a `TaskCreate` tool call in the session transcript jsonl. Each carries a `subject`, an `activeForm` (present-continuous phrasing, e.g. `"Adding fmt_dur helper"`), an optional `description`, and a status (`pending` → `in_progress` → `completed`). IDs are assigned sequentially `#1..#N` by the harness in creation order. Reconstructed by event-folding `TaskCreate` + `TaskUpdate` lines in the session jsonl.
+_Avoid_: "todo" (overloaded with editor TODO comments and chat-side checklists).
+
+**Active Task**:
+The (at most one) **Task** currently in `in_progress`. Drives the text shown on the **Task Row**'s right side.
+
+**Task Row**:
+The statusline row that summarises **Task** progress. Format: glyph + `<completed>/<total>` count + **Active Task** `activeForm`. Sits between the plugins/skills row and the subagent rows — narrative position is *planned activity* (above the *live activity* of running subagents). Sourced from the main session jsonl only; subagent transcripts are intentionally out of scope so the count is never ambiguous about whose plan it represents. Plan-mode plans (markdown blobs from `ExitPlanMode`) are also out of scope — they're unstructured prose with no per-bullet state.
+
+**Task Freshness Cap**:
+The 2-minute staleness limit on the **Task Row**. If the most recent `TaskCreate` / `TaskUpdate` event in the session jsonl is older than 2 minutes, the row hides even if non-completed tasks remain — defending against the known stale-list problem where the agent moves on to unrelated work without cleaning up. The row reappears the moment a new task event lands. Distinct from the 20-second post-update grace window, which keeps the row visible briefly after everything flips to `completed` so the "done" beat is readable. See [docs/adr/0004-task-progress-row.md](docs/adr/0004-task-progress-row.md).
+_Avoid_: "task TTL" (suggests the tasks themselves expire — they don't, only the row's visibility does).
 
 ### Rate limits
 

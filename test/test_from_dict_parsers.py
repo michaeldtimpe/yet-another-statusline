@@ -5,9 +5,6 @@ import pytest
 import statusline_command as sl
 
 
-# ---------------------------------------------------------------------------
-# 2.2  Parametrised: from_dict({}) returns all-default instance
-# ---------------------------------------------------------------------------
 
 _FROM_DICT_CASES = [
     ('Model',        sl.Model,        sl.Model()),
@@ -29,18 +26,12 @@ def test_from_dict_empty_yields_defaults(name: str, cls: Any, default: object) -
     assert cls.from_dict({}) == default
 
 
-# ---------------------------------------------------------------------------
-# 2.3  Unknown key is silently ignored
-# ---------------------------------------------------------------------------
 
 def test_session_info_ignores_unknown_key() -> None:
     result = sl.SessionInfo.from_dict({'experimental_field': 'x'})
     assert result == sl.SessionInfo()
 
 
-# ---------------------------------------------------------------------------
-# 2.4  ContextWindow: missing current_usage → default CurrentUsage
-# ---------------------------------------------------------------------------
 
 def test_context_window_missing_current_usage() -> None:
     result = sl.ContextWindow.from_dict({'used_percentage': 8})
@@ -48,18 +39,12 @@ def test_context_window_missing_current_usage() -> None:
     assert result.used_percentage == 8
 
 
-# ---------------------------------------------------------------------------
-# 2.5  RateBucket: used_percentage is rounded to two decimal places
-# ---------------------------------------------------------------------------
 
 def test_rate_bucket_rounds_used_percentage() -> None:
     result = sl.RateBucket.from_dict({'used_percentage': 12.3456, 'resets_at': 1700000000})
     assert result == sl.RateBucket(used_percentage=12.35, resets_at=1700000000)
 
 
-# ---------------------------------------------------------------------------
-# 2.6  SessionInfo.from_dict recursively populates nested objects
-# ---------------------------------------------------------------------------
 
 def test_session_info_recursive_population() -> None:
     payload = {

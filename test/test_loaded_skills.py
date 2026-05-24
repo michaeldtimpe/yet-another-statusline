@@ -22,13 +22,13 @@ def _read_skill_line(skill_name: str) -> str:
 
 
 def test_missing_file_returns_empty() -> None:
-    """5.2 Missing file returns empty LoadedSkills."""
+    """Missing file returns empty LoadedSkills."""
     result = sl.LoadedSkills.from_transcript('')
     assert result == sl.LoadedSkills(names=[])
 
 
 def test_skill_tool_call_extracts_name(tmp_path: Path) -> None:
-    """5.3 Skill tool call line extracts the skill name."""
+    """Skill tool call line extracts the skill name."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(_skill_line('python-style') + '\n')
 
@@ -37,7 +37,7 @@ def test_skill_tool_call_extracts_name(tmp_path: Path) -> None:
 
 
 def test_read_skill_md_extracts_name(tmp_path: Path) -> None:
-    """5.4 Read of .../skills/<name>/SKILL.md extracts the skill name."""
+    """Read of .../skills/<name>/SKILL.md extracts the skill name."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(_read_skill_line('tdd') + '\n')
 
@@ -46,7 +46,7 @@ def test_read_skill_md_extracts_name(tmp_path: Path) -> None:
 
 
 def test_duplicates_collapsed_order_preserved(tmp_path: Path) -> None:
-    """5.5 Duplicates collapsed; insertion order preserved."""
+    """Duplicates collapsed; insertion order preserved."""
     p = tmp_path / 'transcript.jsonl'
     p.write_text(
         _skill_line('tdd') + '\n' +
