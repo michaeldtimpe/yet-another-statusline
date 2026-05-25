@@ -9,7 +9,7 @@ segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
 <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
-  · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan · start <opened> last <refresh> · <model> <effort>
+  · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan · start <opened> · last <refresh> · <model> <effort>
 ```
 
 Field meanings: **full-path** = the working directory, home-relative (`~/…`),
@@ -24,9 +24,9 @@ context-low warning uses, so they agree), with raw `total/size` as the fallback
 for older payloads; **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
-notional, so not shown); **`start <opened> last <refresh>`** = the date + clock
-time the session began (`%d-%b-%y %H:%M`, lowercased) and the clock time of the
-current render (a freshness signal). The
+notional, so not shown); **`start <opened> · last <refresh>`** = the date the
+session began (`%d-%b-%y`, lowercased) and the clock time of the current render
+(a freshness signal). The
 **model** is pinned last; cost ($) and cumulative ↓in/↑out were intentionally
 dropped.
 
