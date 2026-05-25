@@ -31,7 +31,8 @@ dropped.
 
 It is **responsive**: the **path shrinks first** (smart middle-ellipsis) to keep
 the data segments; only when the path hits its floor do the lowest-value segments
-drop (rate → cache → uptime → limits); the model stays pinned last. Terminal
+drop (rate → cache → timestamp → plan/quota); `git`/`ctx`/model are protected and
+the model stays pinned last. Terminal
 width: Claude Code provides no TTY/`COLUMNS`, so width falls back to an
 AppleScript query of iTerm2/Terminal (cached ~5s in `~/.claude/.statusline-width`);
 `~/.claude/terminal-width` forces a value.
