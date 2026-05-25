@@ -6,7 +6,7 @@ shows your working directory, git state, context usage, plan quotas, and session
 timing on one line that adapts to the terminal width.
 
 ```
-~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · start: 25-may-26 11:00 last: 13:14 · Opus 4.7 1M xhigh
+~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · start 25-may-26 11:00 last 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
@@ -79,12 +79,12 @@ last.
 | `5h N% T-H:MM` | rolling 5-hour plan quota + time to reset |
 | `7d N%` | rolling weekly plan quota |
 | `plan` | you're on a subscription (so cost is notional and not shown) |
-| `start: DD-mon-YY HH:MM last: HH:MM` | session opened (date + clock time) and last refresh (this render's clock time) |
+| `start DD-mon-YY HH:MM last HH:MM` | session opened (date + clock time) and last refresh (this render's clock time) |
 | `Opus 4.7 1M xhigh` | model + thinking effort (pinned last) |
 
 The git **state color** is your traffic light: green = clean & in sync,
 yellow = uncommitted changes and/or commits to push, red = behind/diverged/
-detached. The `last:` time doubles as a freshness signal — the bar only
+detached. The `last` time doubles as a freshness signal — the bar only
 re-renders on activity, so a stale time means the session has been idle.
 
 > **No duplicate context %.** When you're near the limit, Claude Code shows its
