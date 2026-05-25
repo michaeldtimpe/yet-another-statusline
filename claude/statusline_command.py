@@ -1079,10 +1079,10 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     start   = _session_start(session.transcript_path)
     if start:
         started = datetime.fromtimestamp(start).strftime('%d-%b-%y %H:%M').lower()
-        segs.append((f'{r.LABEL}start: {r.white_brt}{started}{r.R} '
-                     f'{r.LABEL}last: {r.white_brt}{now_str}{r.R}', 7))   # opened + last refresh
+        segs.append((f'{r.LABEL}start {r.white_brt}{started}{r.R} '
+                     f'{r.LABEL}last {r.white_brt}{now_str}{r.R}', 7))   # opened + last refresh
     else:
-        segs.append((f'{r.LABEL}last: {r.white_brt}{now_str}{r.R}', 7))
+        segs.append((f'{r.LABEL}last {r.white_brt}{now_str}{r.R}', 7))
     segs.append((model, 3))   # pinned visually last
 
     # ---- responsive fit ----

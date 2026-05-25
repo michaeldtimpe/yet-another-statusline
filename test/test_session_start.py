@@ -39,7 +39,7 @@ def test_render_shows_uptime_when_started(monkeypatch, tmp_path: Path) -> None:
                            'context_window_size': 200000},
     }
     out = ANSI.sub('', sl.render(info, 200))
-    assert 'start: ' in out and 'last: ' in out   # opened + last-refresh timestamps present
+    assert 'start ' in out and 'last ' in out   # opened + last-refresh timestamps present
     assert out.rstrip().endswith('Opus 4.7')  # model pinned last
 
 
