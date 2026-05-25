@@ -6,7 +6,7 @@ shows your working directory, git state, context usage, plan quotas, and session
 timing on one line that adapts to the terminal width.
 
 ```
-~/Downloads/yet-another-statusline · git main/24b6a4f ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · up 2h14m (11:00 → 13:14) · Opus 4.7 1M xhigh
+~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · 11:00 → 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
@@ -45,7 +45,12 @@ font to any monospace you like.
 ### Another MacBook
 
 Same three commands (`git clone … && cd … && make deploy`). Nothing machine-
-specific is baked in; the theme tracks each terminal's own ANSI palette.
+specific is baked in; the theme tracks each terminal's own ANSI palette. Two
+first-run notes: (1) allow the one-time macOS **Automation** prompt so the bar
+can read your real terminal width (see [Terminal width](#terminal-width)); (2)
+keep the clone where you cloned it — the install symlinks back to it, so a later
+`git pull` alone picks up renderer updates (re-run `make deploy` only to change
+the theme or re-register settings).
 
 ### Updating
 
@@ -57,8 +62,9 @@ cd ~/code/yet-another-statusline && git pull && make deploy
 
 Segments are separated by ` · `. As the terminal narrows the **path shrinks
 first** (smart middle-ellipsis) to keep the data segments; only once the path is
-at its floor do the lowest-value segments drop (rate → cache → uptime → …). The
-model is pinned last.
+at its floor do the lowest-value segments drop (rate → cache → timestamp →
+plan/quota). `git`, `ctx`, and the model are protected, and the model is pinned
+last.
 
 | Segment | Meaning |
 |---|---|
@@ -67,7 +73,7 @@ model is pinned last.
 | `+N ~N -N RN` | untracked · modified · deleted · renamed (only non-zero shown) |
 | `↑N ↓N` | commits ahead / behind the upstream |
 | `✓` | clean working tree, tracking a remote, fully synced |
-| `ctx N% used/size` | context-window occupancy — your compaction-risk gauge |
+| `ctx N% used/size` | context-window occupancy (compaction risk); the `%` is Claude Code's own `used_percentage`, so it matches the context warning Claude Code shows on the right of this row |
 | `cache N` | cumulative cache-read tokens this session |
 | `N/m` | token throughput per minute |
 | `5h N% T-H:MM` | rolling 5-hour plan quota + time to reset |
@@ -81,14 +87,25 @@ yellow = uncommitted changes and/or commits to push, red = behind/diverged/
 detached. The last-refresh time doubles as a freshness signal — the bar only
 re-renders on activity, so a stale time means the session has been idle.
 
+> **No duplicate context %.** When you're near the limit, Claude Code shows its
+> own *"N% context used"* warning on the right side of this same row — that's
+> Claude Code's notification area, not part of this statusline and not removable
+> from a script. The `ctx` segment reads the same `used_percentage` field, so the
+> two agree instead of showing two different numbers.
+
 ## Terminal width
 
 Claude Code runs the status line as a subprocess with no TTY and `COLUMNS` unset,
 so the usual width probes can't see your real window. On macOS the renderer falls
-back to asking iTerm2 / Terminal for the column count via AppleScript (cached ~5s,
-so it tracks resizes without spawning `osascript` on every render). To force a
-width (tmux, SSH, or any non-AppleScript terminal), write it to
-`~/.claude/terminal-width`:
+back to asking **iTerm2 / Terminal.app** for the column count via AppleScript
+(cached ~5s, so it tracks resizes without spawning `osascript` on every render).
+
+> **First run on a new Mac:** the first AppleScript call triggers a one-time
+> macOS **Automation** permission prompt (*"… wants to control iTerm2"*) — allow
+> it, or the bar stays at the 160-column fallback until you do.
+
+To force a width (tmux, SSH, or any terminal that isn't iTerm2/Terminal.app),
+write it to `~/.claude/terminal-width`:
 
 ```bash
 echo 200 > ~/.claude/terminal-width   # overrides detection
