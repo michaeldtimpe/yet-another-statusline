@@ -24,9 +24,9 @@ context-low warning uses, so they agree), with raw `total/size` as the fallback
 for older payloads; **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
-notional, so not shown); **`start <opened> · last <refresh>`** = the date the
-session began (`%d-%b-%y`, lowercased) and the clock time of the current render
-(a freshness signal). The
+notional, so not shown); **`start <opened> · last <refresh>`** = the date + clock
+time the session began (`%d-%b-%y %H:%M`, lowercased) and the clock time of the
+current render (a freshness signal). The
 **model** is pinned last; cost ($) and cumulative ↓in/↑out were intentionally
 dropped.
 
