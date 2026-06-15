@@ -3,3 +3,6 @@ __pycache__
 
 # Generated statusline demo snapshots (make demo/img)
 demo/
+
+# Local gitkit tooling artifacts (survey notes, plans, reports)
+.luxe/
