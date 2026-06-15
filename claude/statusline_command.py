@@ -241,6 +241,27 @@ class TokenAccounting:
         return cost / 1_000_000
 
     @staticmethod
+    def effective_tokens(model: Model, usage: TranscriptUsage) -> float:
+        """Billing-weighted session token total, in input-token-equivalents.
+
+        Each class is scaled by its price relative to the input rate — cache
+        read 0.1x, cache write 1.25x, output rate_out/rate_in — so re-read cache
+        tokens (cheap, and counted every turn) stop dominating the figure. This
+        is exactly `session_cost` divided by the input rate, so it tracks the
+        billed dollars while staying in token units."""
+        rate_in, rate_out = TokenAccounting.rates_for(
+            model.display_name or model.id
+        )
+        if rate_in <= 0:
+            return 0.0
+        return (
+            usage.input_tokens
+            + usage.cache_creation_input_tokens * 1.25
+            + usage.cache_read_input_tokens * 0.1
+            + usage.output_tokens * (rate_out / rate_in)
+        )
+
+    @staticmethod
     def day_cost(model: Model, token_log: TokenLog) -> float:
         rate_in, rate_out = TokenAccounting.rates_for(
             model.display_name or model.id
@@ -995,7 +1016,8 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     (keeping git/ctx/model); the model is pinned last.
 
         <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
-          · ctx % used/size · cache N · <rate>/m · 5h % T-H:MM · 7d % · plan
+          · ctx % used/size · tok <billed-weighted> · cache N · <rate>/m
+          · T-H:MM 5h% · 7d % · plan
           · up <elapsed> (<opened> → <last-refresh>) · <model> <effort>
 
     The `git` label is coloured by state: green clean+synced, yellow pending
@@ -1059,6 +1081,11 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
     cache_seg = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
     rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
+    # billing-weighted session token total, in input-token-equivalents: each
+    # class scaled by its price (cache read 0.1x, cache write 1.25x, output 5x),
+    # so re-read cache tokens don't dominate. Tracks the billed cost in token units.
+    eff_tok   = TokenAccounting.effective_tokens(session.model, usage)
+    total_seg = f'{r.LABEL}tok {r.TOK}{fmt_tok(round(eff_tok))}{r.R}'
 
     # Segments after the path, each (text, drop_priority). Priorities 1–3 are kept
     # (path truncates instead); ≥4 are dropped first (trivia/limits).
@@ -1066,13 +1093,18 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     if git_seg:
         segs.append((git_seg, 1))
     segs.append((ctx_seg, 2))
+    segs.append((total_seg, 4))
     segs.append((cache_seg, 8))
     segs.append((rate_seg, 9))
     if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
         reset    = _fmt_reset(five.resets_at)
-        five_seg = f'{r.LABEL}5h {r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
+        five_pct = f'{r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
+        # Lead with the countdown (T-H:MM) — the time-to-refresh is the signal;
+        # the `5h` label is only needed when there's no countdown to imply it.
         if reset:
-            five_seg += f' {r.COMMIT}{reset}{r.R}'
+            five_seg = f'{r.COMMIT}{reset}{r.R} {five_pct}'
+        else:
+            five_seg = f'{r.LABEL}5h {five_pct}'
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
         segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
     now_str = datetime.now().strftime('%H:%M')
