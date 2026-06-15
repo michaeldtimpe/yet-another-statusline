@@ -6,7 +6,7 @@ shows your working directory, git state, context usage, plan quotas, and session
 timing on one line that adapts to the terminal width.
 
 ```
-~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 18.2M · cache 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
+~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 16.4M · cache 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
