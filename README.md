@@ -6,7 +6,7 @@ shows your working directory, git state, context usage, plan quotas, and session
 timing on one line that adapts to the terminal width.
 
 ```
-~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · cache 157.6M · 18.0K/m · 5h 20% T-1:05 · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
+~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 18.2M · cache 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
@@ -63,8 +63,8 @@ cd ~/code/yet-another-statusline && git pull && make deploy
 Segments are separated by ` · `. As the terminal narrows the **path shrinks
 first** (smart middle-ellipsis) to keep the data segments; only once the path is
 at its floor do the lowest-value segments drop (rate → cache → timestamp →
-plan/quota). `git`, `ctx`, and the model are protected, and the model is pinned
-last.
+plan/quota → tok). `git`, `ctx`, and the model are protected, and the model is
+pinned last.
 
 | Segment | Meaning |
 |---|---|
@@ -74,9 +74,10 @@ last.
 | `↑N ↓N` | commits ahead / behind the upstream |
 | `✓` | clean working tree, tracking a remote, fully synced |
 | `ctx N% used/size` | context-window occupancy (compaction risk); the `%` is Claude Code's own `used_percentage`, so it matches the context warning Claude Code shows on the right of this row |
-| `cache N` | cumulative cache-read tokens this session |
+| `tok N` | session tokens, **billing-weighted** (cache read 0.1×, cache write 1.25×, output 5×) and in input-token-equivalents, so repeated cache re-reads don't dominate; tracks billed cost in token units |
+| `cache N` | cumulative cache-read tokens this session (raw count — much larger than `tok` because re-reads are counted every turn) |
 | `N/m` | token throughput per minute |
-| `5h N% T-H:MM` | rolling 5-hour plan quota + time to reset |
+| `T-H:MM N%` | rolling 5-hour plan quota: time to reset (countdown leads) + % used |
 | `7d N%` | rolling weekly plan quota |
 | `plan` | you're on a subscription (so cost is notional and not shown) |
 | `start DD-mon-YY HH:MM · last HH:MM` | session opened (date + clock time) and last refresh (this render's clock time) |
