@@ -2,11 +2,18 @@
 
 A compact, **single-line, Monaco-safe** status line for
 [Claude Code](https://claude.com/claude-code) — **no Nerd Font required**. It
-shows your working directory, git state, context usage, plan quotas, and session
-timing on one line that adapts to the terminal width.
+shows your working directory, git state, context usage, plan quotas (or API
+spend), and session timing on one line that adapts to the terminal width.
 
 ```
-~/Downloads/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 16.4M · cache 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
+~/D/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 16.4M · cache 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
+```
+
+On metered API billing there are no plan quotas, so the `5h/7d/plan` trio is
+replaced by the session spend (colored by amount) tagged `api`:
+
+```
+~/D/yet-another-statusline · git main/90db263 ✓ · ctx 84% 844.1K/1.0M · tok 16.4M · cache 157.6M · 18.0K/m · cost $42.18 · api · start 25-may-26 11:00 · last 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
@@ -60,15 +67,16 @@ cd ~/code/yet-another-statusline && git pull && make deploy
 
 ## The line, explained
 
-Segments are separated by ` · `. As the terminal narrows the **path shrinks
-first** (smart middle-ellipsis) to keep the data segments; only once the path is
-at its floor do the lowest-value segments drop (rate → cache → timestamp →
-plan/quota → tok). `git`, `ctx`, and the model are protected, and the model is
-pinned last.
+Segments are separated by ` · `. The **path is always minimized** (intermediate
+directories collapse to their first letter, the project name stays full) so the
+data segments keep horizontal room. As the terminal narrows the path shrinks
+further (smart middle-ellipsis); only once the path is at its floor do the
+lowest-value segments drop (rate → cache → timestamp → plan/quota → tok). `git`,
+`ctx`, and the model are protected, and the model is pinned last.
 
 | Segment | Meaning |
 |---|---|
-| `~/path/to/dir` | working directory, home-relative; shown in full, truncated only on overflow |
+| `~/p/to/dir` | working directory, home-relative, **minimized** (intermediate dirs → first letter, project name kept full); middle-ellipsized further only on overflow |
 | `git <branch>/<commit>` | git label, **colored by state**: 🟢 clean & synced · 🟡 pending · 🔴 drift/error |
 | `+N ~N -N RN` | untracked · modified · deleted · renamed (only non-zero shown) |
 | `↑N ↓N` | commits ahead / behind the upstream |
@@ -77,9 +85,11 @@ pinned last.
 | `tok N` | session tokens, **billing-weighted** (cache read 0.1×, cache write 1.25×, output 5×) and in input-token-equivalents, so repeated cache re-reads don't dominate; tracks billed cost in token units |
 | `cache N` | cumulative cache-read tokens this session (raw count — much larger than `tok` because re-reads are counted every turn) |
 | `N/m` | token throughput per minute |
-| `T-H:MM N%` | rolling 5-hour plan quota: time to reset (countdown leads) + % used |
-| `7d N%` | rolling weekly plan quota |
+| `T-H:MM N%` | rolling 5-hour plan quota: time to reset (countdown leads) + % used (subscription only) |
+| `7d N%` | rolling weekly plan quota (subscription only) |
 | `plan` | you're on a subscription (so cost is notional and not shown) |
+| `cost $N` | **API billing only** — session spend, replacing the `5h/7d/plan` trio; colored 🟢 under $50 · 🟡 $50–99 · 🔴 $100+ |
+| `api` | you're on metered API/console billing (so `cost` is real spend) |
 | `start DD-mon-YY HH:MM · last HH:MM` | session opened (date + clock time) and last refresh (this render's clock time) |
 | `Opus 4.7 1M xhigh` | model + thinking effort (pinned last) |
 
