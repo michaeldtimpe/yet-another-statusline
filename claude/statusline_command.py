@@ -1018,7 +1018,8 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
         <min-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
           · ctx % used/size · tok <billed-weighted> · cache N · <rate>/m
           · T-H:MM 5h% · 7d % · plan          (subscription)
-          · est $<session-cost> · api          (API billing — replaces 5h/7d)
+          · cost $<session-cost> · api         (API billing — replaces 5h/7d;
+                                                 spend colour: green<50 yellow<100 red)
           · start <opened> · last <refresh> · <model> <effort>
 
     The path is always shown minimized (intermediate dirs → first letter,
@@ -1118,8 +1119,10 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
         segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
     else:
-        est = effective_session_cost(session, usage)
-        segs += [(f'{r.LABEL}est {r.COST}${est:.2f}{r.R}', 5),
+        cost = effective_session_cost(session, usage)
+        # Reactive spend colour: green ≤ $49, yellow $50–99, red ≥ $100.
+        cost_clr = r.safe if cost < 50 else (r.warn if cost < 100 else r.alert)
+        segs += [(f'{r.LABEL}cost {cost_clr}${cost:.2f}{r.R}', 5),
                  (f'{r.LABEL}api{r.R}', 6)]
     now_str = datetime.now().strftime('%H:%M')
     start   = _session_start(session.transcript_path)
