@@ -87,10 +87,36 @@ def test_subscription_plan_shows_limits_and_plan_tag(monkeypatch, tmp_path) -> N
     assert 'api' not in out and 'est' not in out
 
 
-def test_api_billing_replaces_limits_with_estimated_cost(monkeypatch, tmp_path) -> None:
-    # No rate_limits -> API billing. The 5h/7d windows are replaced by an
-    # estimated session cost and tagged `api`.
+def test_api_billing_replaces_limits_with_session_cost(monkeypatch, tmp_path) -> None:
+    # No rate_limits -> API billing. The 5h/7d windows are replaced by the
+    # session cost and tagged `api`.
     out = _render_info(monkeypatch, tmp_path, {'cost': {'total_cost_usd': 1.23}})
     assert 'api' in out
-    assert 'est $1.23' in out
+    assert 'cost $1.23' in out
     assert 'plan' not in out and '5h ' not in out and '7d ' not in out
+
+
+def _render_info_raw(monkeypatch, tmp_path, info, width=240):
+    # Same as _render_info but keeps ANSI so colour codes can be asserted.
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl.GitInfo, 'from_cwd', staticmethod(lambda c: sl.GitInfo()))
+    base = {
+        'session_id': 's', 'cwd': str(tmp_path),
+        'model': {'id': 'opus', 'display_name': 'Opus'},
+        'context_window': {'total_input_tokens': 1, 'total_output_tokens': 1,
+                           'context_window_size': 200000},
+    }
+    base.update(info)
+    return sl.render(base, width)
+
+
+def test_api_cost_colour_reacts_to_amount(monkeypatch, tmp_path) -> None:
+    # green < $50, yellow $50-99, red >= $100.
+    r = sl.Renderer()
+    cases = [(12.00, r.safe), (49.99, r.safe),
+             (50.00, r.warn), (99.99, r.warn),
+             (100.00, r.alert), (250.00, r.alert)]
+    for amount, expected_clr in cases:
+        out = _render_info_raw(monkeypatch, tmp_path, {'cost': {'total_cost_usd': amount}})
+        assert f'{expected_clr}${amount:.2f}' in out, (amount, expected_clr)

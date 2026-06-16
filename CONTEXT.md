@@ -10,7 +10,7 @@ segments built by `render_lines()` (no box frame, no wasted space):
 ```
 <min-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
   · tok <billed-weighted> · cache N · <rate>/m · T-H:MM 5h% · 7d % · plan · start <opened> · last <refresh> · <model> <effort>
-  (API billing instead: · est $<session-cost> · api  — replaces the 5h/7d/plan trio)
+  (API billing instead: · cost $<session-cost> · api  — replaces the 5h/7d/plan trio)
 ```
 
 Field meanings: **min-path** = the working directory, home-relative (`~/…`),
@@ -32,8 +32,9 @@ cache re-reads don't dominate; **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
 notional, so not shown). On **metered API/console billing** there are no 5h/7d
-windows, so that whole trio is replaced by **est $<session-cost>** (the estimated
-session spend, preferring the payload's `cost.total_cost_usd`) tagged **api**;
+windows, so that whole trio is replaced by **cost $<session-cost>** (the session
+spend, preferring the payload's `cost.total_cost_usd`) tagged **api**; the dollar
+figure is colour-reactive — green under $50, yellow $50–99, red $100+;
 **`start <opened> · last <refresh>`** = the date + clock
 time the session began (`%d-%b-%y %H:%M`, lowercased) and the clock time of the
 current render (a freshness signal). The
@@ -155,7 +156,7 @@ The weekly quota in `rate_limits.seven_day`. Shown in the model row after the Fi
 A `plan` tag rendered next to the rate-limit quotas whenever any quota is present (subscription plans expose `rate_limits`; metered API/console use does not). It signals that **Session Cost** is the *notional* API-equivalent figure Claude Code reports, not incremental spend.
 
 **API billing marker**:
-When no quota is present (metered API/console use exposes no `rate_limits`), the 5h/7d/`plan` trio is meaningless and is replaced by **est $<session-cost>** + an `api` tag. The cost prefers the payload's authoritative `cost.total_cost_usd` and falls back to the token×rate estimate (`effective_session_cost`). Here the dollar figure is *real billed spend*, the inverse of the `plan` case where cost is notional.
+When no quota is present (metered API/console use exposes no `rate_limits`), the 5h/7d/`plan` trio is meaningless and is replaced by **cost $<session-cost>** + an `api` tag. The cost prefers the payload's authoritative `cost.total_cost_usd` and falls back to the token×rate estimate (`effective_session_cost`). Here the dollar figure is *real billed spend*, the inverse of the `plan` case where cost is notional, so it is **colour-reactive** as a spend warning: green under $50, yellow $50–99, red $100 and above.
 
 ## Relationships
 
