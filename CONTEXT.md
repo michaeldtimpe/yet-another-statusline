@@ -8,12 +8,16 @@ This fork renders a single, compact, **borderless** line of ` · `-separated
 segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
-<full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
+<min-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
   · tok <billed-weighted> · cache N · <rate>/m · T-H:MM 5h% · 7d % · plan · start <opened> · last <refresh> · <model> <effort>
+  (API billing instead: · est $<session-cost> · api  — replaces the 5h/7d/plan trio)
 ```
 
-Field meanings: **full-path** = the working directory, home-relative (`~/…`),
-shown in full and truncated only when the line would overflow; **git** = a
+Field meanings: **min-path** = the working directory, home-relative (`~/…`),
+always shown **minimized** (each intermediate dir collapsed to its first letter,
+the project name kept full) so the data segments keep horizontal room;
+middle-ellipsis truncation kicks in only if even the minimized form overflows;
+**git** = a
 state-coloured label (green clean+synced, yellow pending = uncommitted changes or
 commits to push, red drift/error = behind/diverged/detached) followed by
 `branch/commit` and markers — `+`untracked `~`modified `-`deleted `R`renamed
@@ -27,16 +31,19 @@ write 1.25×, output 5×) and expressed in input-token-equivalents, so repeated
 cache re-reads don't dominate; **cache** = cumulative cache-read
 tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
 rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
-notional, so not shown); **`start <opened> · last <refresh>`** = the date + clock
+notional, so not shown). On **metered API/console billing** there are no 5h/7d
+windows, so that whole trio is replaced by **est $<session-cost>** (the estimated
+session spend, preferring the payload's `cost.total_cost_usd`) tagged **api**;
+**`start <opened> · last <refresh>`** = the date + clock
 time the session began (`%d-%b-%y %H:%M`, lowercased) and the clock time of the
 current render (a freshness signal). The
 **model** is pinned last; cost ($) and cumulative ↓in/↑out were intentionally
 dropped.
 
-It is **responsive**: the **path shrinks first** (smart middle-ellipsis) to keep
-the data segments; only when the path hits its floor do the lowest-value segments
-drop (rate → cache → timestamp → plan/quota); `git`/`ctx`/model are protected and
-the model stays pinned last. Terminal
+It is **responsive**: the path is always minimized up front, and shrinks further
+(smart middle-ellipsis) to keep the data segments; only when the path hits its
+floor do the lowest-value segments drop (rate → cache → timestamp → plan/quota);
+`git`/`ctx`/model are protected and the model stays pinned last. Terminal
 width: Claude Code provides no TTY/`COLUMNS`, so width falls back to an
 AppleScript query of iTerm2/Terminal (cached ~5s in `~/.claude/.statusline-width`);
 `~/.claude/terminal-width` forces a value.
@@ -146,6 +153,9 @@ The weekly quota in `rate_limits.seven_day`. Shown in the model row after the Fi
 
 **Plan marker**:
 A `plan` tag rendered next to the rate-limit quotas whenever any quota is present (subscription plans expose `rate_limits`; metered API/console use does not). It signals that **Session Cost** is the *notional* API-equivalent figure Claude Code reports, not incremental spend.
+
+**API billing marker**:
+When no quota is present (metered API/console use exposes no `rate_limits`), the 5h/7d/`plan` trio is meaningless and is replaced by **est $<session-cost>** + an `api` tag. The cost prefers the payload's authoritative `cost.total_cost_usd` and falls back to the token×rate estimate (`effective_session_cost`). Here the dollar figure is *real billed spend*, the inverse of the `plan` case where cost is notional.
 
 ## Relationships
 
