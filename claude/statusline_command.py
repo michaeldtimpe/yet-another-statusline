@@ -429,6 +429,75 @@ class RateLimits:
             seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
         )
 
+    def is_live(self) -> bool:
+        """True when this payload actually carries rate-limit data — the signal
+        that the session is on a subscription plan (5h/7d windows) rather than
+        API billing."""
+        return bool(self.five_hour.resets_at or self.seven_day.resets_at
+                    or self.five_hour.used_percentage or self.seven_day.used_percentage)
+
+
+class BillingCache:
+    """Plan vs API billing is inferred from whether a payload carries
+    `rate_limits`. Claude Code intermittently emits a frame with `rate_limits`
+    null (e.g. a refresh that fires before the window data is fetched), which
+    momentarily flips a plan user to `api`. Remember the last live buckets per
+    session and reuse them across these gaps so the mode — and the displayed
+    countdown/percentages — stay stable. A genuine API session never carries
+    rate-limit data, so nothing is ever cached and it correctly stays `api`."""
+    TTL  = 1800.0   # seconds; an active plan session refreshes this every render
+
+    @classmethod
+    def resolve(cls, session_id: str, rl: RateLimits) -> RateLimits:
+        """Return `rl` when it carries data (and persist it); otherwise fall back
+        to this session's last cached buckets so a transient null frame doesn't
+        flip the billing mode."""
+        if not session_id:
+            return rl
+        # Computed at call time (not a class attribute) so tests monkeypatching
+        # HOME — and any future relocation — are honoured.
+        path = HOME / '.claude' / '.statusline-billing'
+        now = time.time()
+        others: list[str] = []   # still-fresh rows for other sessions
+        cached: list[str] | None = None
+        try:
+            for ln in path.read_text().splitlines():
+                p = ln.split()
+                if len(p) != 6:
+                    continue
+                try:
+                    if now - float(p[0]) > cls.TTL:
+                        continue
+                except ValueError:
+                    continue
+                if p[1] == session_id:
+                    cached = p
+                else:
+                    others.append(ln)
+        except OSError:
+            pass
+
+        if rl.is_live():
+            fh, sd = rl.five_hour, rl.seven_day
+            others.append(f'{now:.0f} {session_id} {fh.used_percentage} '
+                          f'{fh.resets_at} {sd.used_percentage} {sd.resets_at}')
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('\n'.join(others) + '\n')
+            except OSError:
+                pass
+            return rl
+
+        if cached:
+            try:
+                return RateLimits(
+                    five_hour = RateBucket(used_percentage=float(cached[2]), resets_at=int(cached[3])),
+                    seven_day = RateBucket(used_percentage=float(cached[4]), resets_at=int(cached[5])),
+                )
+            except ValueError:
+                pass
+        return rl
+
 
 @dataclass
 class SessionInfo:
@@ -1039,7 +1108,8 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     today = datetime.now().strftime('%Y-%m-%d')
     TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
     tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
-    five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
+    rate_limits = BillingCache.resolve(session.session_id, session.rate_limits)
+    five, seven = rate_limits.five_hour, rate_limits.seven_day
 
     # Minimized home-relative path: intermediate dirs collapse to their first
     # letter, the project name stays full (`short_pwd`). Always minimized so the
@@ -1105,8 +1175,7 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     # billing does not. When on a plan, show the limit windows + a `plan` tag.
     # When on API, those windows are meaningless — replace them with the
     # estimated session cost and tag it `api` so the mode is unambiguous.
-    on_plan = bool(five.resets_at or seven.resets_at
-                   or five.used_percentage or seven.used_percentage)
+    on_plan = rate_limits.is_live()
     if on_plan:
         reset    = _fmt_reset(five.resets_at)
         five_pct = f'{r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'

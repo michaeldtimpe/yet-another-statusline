@@ -96,6 +96,46 @@ def test_api_billing_replaces_limits_with_session_cost(monkeypatch, tmp_path) ->
     assert 'plan' not in out and '5h ' not in out and '7d ' not in out
 
 
+def test_null_rate_limits_after_plan_frame_stays_plan(monkeypatch, tmp_path) -> None:
+    # Claude Code intermittently emits a frame with `rate_limits` null. After a
+    # plan session has been seen, such a frame must NOT flip the bar to `api` —
+    # BillingCache reuses the last live buckets.
+    plan = {'rate_limits': {'five_hour': {'used_percentage': 10, 'resets_at': 0},
+                            'seven_day': {'used_percentage': 12, 'resets_at': 0}}}
+    out_live = _render_info(monkeypatch, tmp_path, plan)
+    assert 'plan' in out_live and 'api' not in out_live
+    # Next frame drops rate_limits entirely; same session id ('s').
+    out_null = _render_info(monkeypatch, tmp_path, {'cost': {'total_cost_usd': 1.23}})
+    assert 'plan' in out_null
+    assert 'api' not in out_null and 'cost $1.23' not in out_null
+    assert '5h 10%' in out_null and '7d 12%' in out_null
+
+
+def test_null_rate_limits_without_prior_plan_is_api(monkeypatch, tmp_path) -> None:
+    # A genuine API session never carries rate-limit data, so nothing is cached
+    # and it stays `api` (no false stickiness from an empty cache).
+    out = _render_info(monkeypatch, tmp_path, {'cost': {'total_cost_usd': 1.23}})
+    assert 'api' in out and 'cost $1.23' in out
+    assert 'plan' not in out
+
+
+def test_billing_cache_is_per_session(monkeypatch, tmp_path) -> None:
+    # One session being on a plan must not leak plan stickiness onto a different
+    # API session sharing the same cache file.
+    monkeypatch.setattr(sl, 'HOME', tmp_path)
+    (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sl.GitInfo, 'from_cwd', staticmethod(lambda c: sl.GitInfo()))
+    base = {'cwd': str(tmp_path), 'model': {'id': 'opus', 'display_name': 'Opus'},
+            'context_window': {'total_input_tokens': 1, 'total_output_tokens': 1,
+                               'context_window_size': 200000}}
+    sl.render({**base, 'session_id': 'plan-sess',
+               'rate_limits': {'five_hour': {'used_percentage': 10, 'resets_at': 0},
+                               'seven_day': {'used_percentage': 12, 'resets_at': 0}}}, 240)
+    out = strip_ansi(sl.render({**base, 'session_id': 'api-sess',
+                                'cost': {'total_cost_usd': 4.00}}, 240))
+    assert 'api' in out and 'cost $4.00' in out and 'plan' not in out
+
+
 def _render_info_raw(monkeypatch, tmp_path, info, width=240):
     # Same as _render_info but keeps ANSI so colour codes can be asserted.
     monkeypatch.setattr(sl, 'HOME', tmp_path)
