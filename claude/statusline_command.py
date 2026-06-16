@@ -1015,10 +1015,14 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     first when the line exceeds `width`; the full path is truncated only after that
     (keeping git/ctx/model); the model is pinned last.
 
-        <full-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
+        <min-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
           · ctx % used/size · tok <billed-weighted> · cache N · <rate>/m
-          · T-H:MM 5h% · 7d % · plan
-          · up <elapsed> (<opened> → <last-refresh>) · <model> <effort>
+          · T-H:MM 5h% · 7d % · plan          (subscription)
+          · est $<session-cost> · api          (API billing — replaces 5h/7d)
+          · start <opened> · last <refresh> · <model> <effort>
+
+    The path is always shown minimized (intermediate dirs → first letter,
+    project name full); it middle-ellipsizes only if even that overflows.
 
     The `git` label is coloured by state: green clean+synced, yellow pending
     (uncommitted changes or commits to push), red drift/error (behind, diverged,
@@ -1036,11 +1040,11 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
     five, seven = session.rate_limits.five_hour, session.rate_limits.seven_day
 
-    # full home-relative path (elastic: shown in full, truncated only if needed)
-    home = os.path.expanduser('~')
-    cwd  = session.cwd or ''
-    full = ('~' + cwd[len(home):]) if home and cwd.startswith(home) else (cwd or session.short_pwd)
-    path_full = f'{r.PWD}{full}{r.R}'
+    # Minimized home-relative path: intermediate dirs collapse to their first
+    # letter, the project name stays full (`short_pwd`). Always minimized so the
+    # segments keep horizontal room; the responsive fit below still
+    # middle-ellipsizes if even this compact form overflows.
+    path_full = f'{r.PWD}{session.short_pwd}{r.R}'
 
     # git segment: state-coloured `git` label + branch/commit + markers
     git_seg = None
@@ -1096,7 +1100,13 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     segs.append((total_seg, 4))
     segs.append((cache_seg, 8))
     segs.append((rate_seg, 9))
-    if five.resets_at or seven.resets_at or five.used_percentage or seven.used_percentage:
+    # Billing mode. Subscription plans report 5h/7d rate-limit windows; API
+    # billing does not. When on a plan, show the limit windows + a `plan` tag.
+    # When on API, those windows are meaningless — replace them with the
+    # estimated session cost and tag it `api` so the mode is unambiguous.
+    on_plan = bool(five.resets_at or seven.resets_at
+                   or five.used_percentage or seven.used_percentage)
+    if on_plan:
         reset    = _fmt_reset(five.resets_at)
         five_pct = f'{r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
         # Lead with the countdown (T-H:MM) — the time-to-refresh is the signal;
@@ -1107,6 +1117,10 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
             five_seg = f'{r.LABEL}5h {five_pct}'
         seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
         segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
+    else:
+        est = effective_session_cost(session, usage)
+        segs += [(f'{r.LABEL}est {r.COST}${est:.2f}{r.R}', 5),
+                 (f'{r.LABEL}api{r.R}', 6)]
     now_str = datetime.now().strftime('%H:%M')
     start   = _session_start(session.transcript_path)
     if start:
