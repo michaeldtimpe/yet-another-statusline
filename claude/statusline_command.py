@@ -450,30 +450,39 @@ class BillingCache:
     @classmethod
     def resolve(cls, session_id: str, rl: RateLimits) -> RateLimits:
         """Return `rl` when it carries data (and persist it); otherwise fall back
-        to this session's last cached buckets so a transient null frame doesn't
-        flip the billing mode."""
+        to cached buckets so a null frame doesn't flip the billing mode. This
+        covers two gaps: a transient null refresh mid-session, AND a brand-new
+        session whose very first frame arrives before window data is fetched —
+        the latter has no row of its own yet, so it borrows the most recent live
+        row from any session. The 5h/7d windows are account-global, so another
+        recent session's buckets are accurate. A genuine API account never writes
+        a row at all, so it correctly stays `api`."""
         if not session_id:
             return rl
         # Computed at call time (not a class attribute) so tests monkeypatching
         # HOME — and any future relocation — are honoured.
         path = HOME / '.claude' / '.statusline-billing'
         now = time.time()
-        others: list[str] = []   # still-fresh rows for other sessions
-        cached: list[str] | None = None
+        others: list[str] = []                # still-fresh rows for other sessions
+        cached: list[str] | None = None       # this session's own row
+        best_other: list[str] | None = None   # most-recent live row from any other session
         try:
             for ln in path.read_text().splitlines():
                 p = ln.split()
                 if len(p) != 6:
                     continue
                 try:
-                    if now - float(p[0]) > cls.TTL:
-                        continue
+                    ts = float(p[0])
                 except ValueError:
+                    continue
+                if now - ts > cls.TTL:
                     continue
                 if p[1] == session_id:
                     cached = p
                 else:
                     others.append(ln)
+                    if best_other is None or ts > float(best_other[0]):
+                        best_other = p
         except OSError:
             pass
 
@@ -488,11 +497,14 @@ class BillingCache:
                 pass
             return rl
 
-        if cached:
+        # Prefer this session's own remembered buckets; fall back to the most
+        # recent live row from another session for a just-started plan session.
+        row = cached or best_other
+        if row:
             try:
                 return RateLimits(
-                    five_hour = RateBucket(used_percentage=float(cached[2]), resets_at=int(cached[3])),
-                    seven_day = RateBucket(used_percentage=float(cached[4]), resets_at=int(cached[5])),
+                    five_hour = RateBucket(used_percentage=float(row[2]), resets_at=int(row[3])),
+                    seven_day = RateBucket(used_percentage=float(row[4]), resets_at=int(row[5])),
                 )
             except ValueError:
                 pass

@@ -98,6 +98,14 @@ yellow = uncommitted changes and/or commits to push, red = behind/diverged/
 detached. The `last` time doubles as a freshness signal — the bar only
 re-renders on activity, so a stale time means the session has been idle.
 
+> **Plan vs API is sticky.** The mode is inferred from whether Claude Code sends
+> rate-limit windows, but it intermittently emits a `null` frame — including at the
+> very start of a new session, before the windows are fetched. So the last live
+> windows are cached (per machine, 30-min TTL) and reused across those gaps; a fresh
+> session borrows the most recent windows from any session so it shows `plan`
+> immediately instead of flashing `api`. A genuine API account never sends windows,
+> so it caches nothing and correctly stays `api`.
+
 > **No duplicate context %.** When you're near the limit, Claude Code shows its
 > own *"N% context used"* warning on the right side of this same row — that's
 > Claude Code's notification area, not part of this statusline and not removable
