@@ -119,9 +119,11 @@ def test_null_rate_limits_without_prior_plan_is_api(monkeypatch, tmp_path) -> No
     assert 'plan' not in out
 
 
-def test_billing_cache_is_per_session(monkeypatch, tmp_path) -> None:
-    # One session being on a plan must not leak plan stickiness onto a different
-    # API session sharing the same cache file.
+def test_new_session_inherits_plan_from_recent_session(monkeypatch, tmp_path) -> None:
+    # A brand-new session's first frame can arrive before window data is fetched
+    # (null rate_limits). Because the 5h/7d windows are account-global, it must
+    # borrow the most recent live buckets from any session on this machine and
+    # show `plan` — not flip to `api` just because its own cache row is empty.
     monkeypatch.setattr(sl, 'HOME', tmp_path)
     (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(sl.GitInfo, 'from_cwd', staticmethod(lambda c: sl.GitInfo()))
@@ -131,9 +133,10 @@ def test_billing_cache_is_per_session(monkeypatch, tmp_path) -> None:
     sl.render({**base, 'session_id': 'plan-sess',
                'rate_limits': {'five_hour': {'used_percentage': 10, 'resets_at': 0},
                                'seven_day': {'used_percentage': 12, 'resets_at': 0}}}, 240)
-    out = strip_ansi(sl.render({**base, 'session_id': 'api-sess',
+    out = strip_ansi(sl.render({**base, 'session_id': 'brand-new-sess',
                                 'cost': {'total_cost_usd': 4.00}}, 240))
-    assert 'api' in out and 'cost $4.00' in out and 'plan' not in out
+    assert 'plan' in out and 'api' not in out
+    assert '5h 10%' in out and '7d 12%' in out
 
 
 def _render_info_raw(monkeypatch, tmp_path, info, width=240):
