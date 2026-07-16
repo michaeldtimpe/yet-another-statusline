@@ -1096,17 +1096,17 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     first when the line exceeds `width`; the full path is truncated only after that
     (keeping git/ctx/model); the model is pinned last.
 
-        <min-path> · git <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
-          · ctx % used/size · tok <billed-weighted> · cache N · <rate>/m
+        <min-path> · <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
+          · ctx % used/size · tkn <billed-weighted> · cch N · <rate>/m
           · T-H:MM 5h% · 7d % · plan          (subscription)
           · cost $<session-cost> · api         (API billing — replaces 5h/7d;
                                                  spend colour: green<50 yellow<100 red)
-          · start <opened> · last <refresh> · <model> <effort>
+          · start +<days-ago> · last <refresh> · <model> <effort>
 
     The path is always shown minimized (intermediate dirs → first letter,
     project name full); it middle-ellipsizes only if even that overflows.
 
-    The `git` label is coloured by state: green clean+synced, yellow pending
+    The branch name is coloured by state: green clean+synced, yellow pending
     (uncommitted changes or commits to push), red drift/error (behind, diverged,
     or detached HEAD). `✓` shows when the branch is clean, tracking, and synced.
     """
@@ -1129,7 +1129,7 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     # middle-ellipsizes if even this compact form overflows.
     path_full = f'{r.PWD}{session.short_pwd}{r.R}'
 
-    # git segment: state-coloured `git` label + branch/commit + markers
+    # git segment: state-coloured branch + commit + markers
     git_seg = None
     if git.branch:
         if git.detached or git.behind > 0:
@@ -1138,7 +1138,7 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
             st = r.warn                                        # yellow: pending
         else:
             st = r.safe                                        # green: clean & synced
-        g = f'{st}git{r.R} {r.BRANCH}{git.branch}{r.R}'
+        g = f'{st}{git.branch}{r.R}'
         if git.commit:
             g += f'{r.COMMIT}/{git.commit}{r.R}'
         if git.untracked: g += f' {r.DIRTY}+{git.untracked}{r.R}'
@@ -1166,13 +1166,13 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     ctx_clr = r.fill_colour(total / SOFT_LIMIT * 100)
     ctx_seg = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
-    cache_seg = f'{r.LABEL}cache {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
+    cache_seg = f'{r.LABEL}cch {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
     rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
     # billing-weighted session token total, in input-token-equivalents: each
     # class scaled by its price (cache read 0.1x, cache write 1.25x, output 5x),
     # so re-read cache tokens don't dominate. Tracks the billed cost in token units.
     eff_tok   = TokenAccounting.effective_tokens(session.model, usage)
-    total_seg = f'{r.LABEL}tok {r.TOK}{fmt_tok(round(eff_tok))}{r.R}'
+    total_seg = f'{r.LABEL}tkn {r.TOK}{fmt_tok(round(eff_tok))}{r.R}'
 
     # Segments after the path, each (text, drop_priority). Priorities 1–3 are kept
     # (path truncates instead); ≥4 are dropped first (trivia/limits).
@@ -1208,9 +1208,9 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     now_str = datetime.now().strftime('%H:%M')
     start   = _session_start(session.transcript_path)
     if start:
-        started = datetime.fromtimestamp(start).strftime('%d-%b-%y %H:%M').lower()
-        segs.append((f'{r.LABEL}start {r.white_brt}{started}{r.R}{SEP}'
-                     f'{r.LABEL}last {r.white_brt}{now_str}{r.R}', 7))   # opened date+time · last refresh
+        days_ago = int((time.time() - start) // 86400)   # full 24h periods elapsed
+        segs.append((f'{r.LABEL}start {r.white_brt}+{days_ago}{r.R}{SEP}'
+                     f'{r.LABEL}last {r.white_brt}{now_str}{r.R}', 7))   # days since opened · last refresh
     else:
         segs.append((f'{r.LABEL}last {r.white_brt}{now_str}{r.R}', 7))
     segs.append((model, 3))   # pinned visually last
