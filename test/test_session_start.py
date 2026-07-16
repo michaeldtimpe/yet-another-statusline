@@ -39,7 +39,8 @@ def test_render_shows_uptime_when_started(monkeypatch, tmp_path: Path) -> None:
                            'context_window_size': 200000},
     }
     out = ANSI.sub('', sl.render(info, 200))
-    assert 'start ' in out and 'last ' in out   # opened + last-refresh timestamps present
+    # `start` now shows a `+N` count of full 24h periods since the session opened.
+    assert re.search(r'start \+\d+', out) and 'last ' in out
     assert out.rstrip().endswith('Opus 4.7')  # model pinned last
 
 

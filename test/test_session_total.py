@@ -45,7 +45,7 @@ def test_session_total_segment_shows_effective_tokens(monkeypatch, tmp_home, str
 
     out = strip_ansi(sl.render(json.loads(_EXAMPLE.read_text()), 200))
 
-    assert 'tok 85.0K' in out
+    assert 'tkn 85.0K' in out
 
 
 def test_session_total_zero_when_no_usage(monkeypatch, tmp_home, strip_ansi):
@@ -54,16 +54,16 @@ def test_session_total_zero_when_no_usage(monkeypatch, tmp_home, strip_ansi):
 
     out = strip_ansi(sl.render(json.loads(_EXAMPLE.read_text()), 200))
 
-    assert 'tok 0 ' in out
+    assert 'tkn 0 ' in out
 
 
 def test_session_total_drops_before_protected_segments(monkeypatch, tmp_home, strip_ansi):
-    # At a narrow width the optional `tok` segment is dropped, but ctx (protected)
+    # At a narrow width the optional `tkn` segment is dropped, but ctx (protected)
     # survives — confirms the new segment is not given protected priority.
     monkeypatch.setattr(sl.TranscriptUsage, 'from_transcript',
                         classmethod(lambda cls, p: _usage(input=10_000, output=8_000)))
 
     out = strip_ansi(sl.render(json.loads(_EXAMPLE.read_text()), 50))
 
-    assert 'tok ' not in out
+    assert 'tkn ' not in out
     assert 'ctx ' in out

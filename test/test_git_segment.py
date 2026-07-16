@@ -24,7 +24,7 @@ def test_git_markers_and_pending_state(monkeypatch, tmp_path) -> None:
     g = sl.GitInfo(branch='main', commit='abc1234', modified=2, untracked=1,
                    ahead=3, has_upstream=True)
     out = _render(monkeypatch, tmp_path, g)
-    assert 'git main/abc1234' in out
+    assert 'main/abc1234' in out
     assert '+1' in out and '~2' in out and '↑3' in out  # untracked / modified / ahead
     assert '✓' not in out
 
