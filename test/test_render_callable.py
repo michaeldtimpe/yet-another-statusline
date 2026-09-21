@@ -62,3 +62,53 @@ def test_render_matches_cli_subprocess(tmp_path, monkeypatch):
     result_api = sl.render(info, 160)
 
     assert result_api == result_cli.rstrip('\n')
+
+
+def _tree(root: Path) -> dict:
+    """Snapshot every file under root as path -> (size, mtime_ns, bytes)."""
+    if not root.exists():
+        return {}
+    out = {}
+    for p in sorted(root.rglob('*')):
+        if p.is_file():
+            st = p.stat()
+            out[str(p)] = (st.st_size, st.st_mtime_ns, p.read_bytes())
+    return out
+
+
+def test_render_record_false_touches_no_state(tmp_home: Path) -> None:
+    """record=False renders normally but writes nothing under HOME/.claude."""
+    claude = tmp_home / '.claude'
+    before = _tree(claude)
+
+    result = sl.render(_load_example(), 160, record=False)
+    assert len(result) > 0
+    assert _tree(claude) == before
+    assert before == {}          # and nothing was created at all
+
+
+def test_render_record_true_writes_state(tmp_home: Path) -> None:
+    """The default still records: the token-rate log appears."""
+    result = sl.render(_load_example(), 160)
+    assert len(result) > 0
+    assert (tmp_home / '.claude' / 'statusline-token-rate.log').exists()
+
+
+def test_render_record_false_is_repeatable(tmp_home: Path) -> None:
+    """A read-only render can be repeated (mon re-renders every 2s) unchanged."""
+    quiet = sl.render(_load_example(), 160, record=False)
+    assert quiet == sl.render(_load_example(), 160, record=False)
+
+
+@pytest.mark.parametrize('payload', ['', '   ', 'not json', '[]', '"str"', 'null'])
+def test_main_ignores_bad_stdin(tmp_path, payload: str) -> None:
+    """Empty, malformed or non-object stdin exits quietly, printing nothing."""
+    import os
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT)],
+        input=payload, capture_output=True, text=True,
+        env={**os.environ, 'COLUMNS': '166', 'HOME': str(tmp_path)},
+    )
+    assert proc.returncode == 0
+    assert proc.stdout == ''
+    assert 'Traceback' not in proc.stderr

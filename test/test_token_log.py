@@ -70,3 +70,72 @@ def test_other_days_excluded_from_return_preserved_on_disk(tmp_home: Path) -> No
     content = log.read_text()
     assert YESTERDAY in content  # yesterday's row preserved
     assert 'old' in content
+
+
+OLD = '2026-05-01'        # 18 days before TODAY
+WEEK_AGO = '2026-05-12'   # exactly KEEP_DAYS before TODAY
+
+
+def test_old_rows_pruned_on_rewrite(tmp_home: Path) -> None:
+    """Rows older than KEEP_DAYS are dropped when the log is rewritten."""
+    log = _log_path(tmp_home)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        f'{OLD} ancient 99 9 99\n'
+        f'{WEEK_AGO} weekold 1 1 1\n'
+        f'{YESTERDAY} recent 5 5 5\n'
+    )
+
+    sl.TokenLog.update('sess-1', TODAY, 10, 1, 20)
+
+    content = log.read_text()
+    assert 'ancient' not in content       # beyond the 7-day window
+    assert 'weekold' in content           # exactly KEEP_DAYS old: kept
+    assert 'recent' in content
+    assert 'sess-1' in content
+
+
+def test_undated_junk_rows_pruned(tmp_home: Path) -> None:
+    """Rows whose date field doesn't parse are junk and are dropped."""
+    log = _log_path(tmp_home)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(f'garbage sess-junk 1 2 3\n\n{TODAY} keeper 1 1 1\n')
+
+    sl.TokenLog.update('sess-1', TODAY, 10, 1, 20)
+
+    lines = log.read_text().splitlines()
+    assert 'garbage sess-junk 1 2 3' not in lines
+    assert f'{TODAY} keeper 1 1 1' in lines
+
+
+def test_prune_keeps_today_rows_from_other_sessions(tmp_home: Path) -> None:
+    """Today's rows from other sessions survive and still roll up."""
+    log = _log_path(tmp_home)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(f'{OLD} ancient 1000 1000 1000\n{TODAY} sess-2 100 50 200\n')
+
+    result = sl.TokenLog.update('sess-1', TODAY, 10, 1, 20)
+
+    # day totals see both of today's sessions and nothing from the pruned row
+    assert result == sl.TokenLog(day_in=110, day_cache_read=51, day_out=220)
+    assert 'ancient' not in log.read_text()
+
+
+def test_unwritable_log_degrades_quietly(monkeypatch, tmp_home: Path) -> None:
+    """A failing write still returns the rolled-up totals instead of raising."""
+    def boom(path, text):
+        raise OSError('read-only')
+    monkeypatch.setattr(sl, '_atomic_write', boom)
+
+    result = sl.TokenLog.update('sess-1', TODAY, 10, 1, 20)
+    assert result == sl.TokenLog(day_in=10, day_cache_read=1, day_out=20)
+
+
+def test_unreadable_log_degrades_quietly(tmp_home: Path) -> None:
+    """An unreadable log reads as 'no log' rather than crashing the statusline."""
+    log = _log_path(tmp_home)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.mkdir()   # a directory where a file is expected: read_text raises OSError
+
+    result = sl.TokenLog.update('sess-1', TODAY, 10, 1, 20)
+    assert result == sl.TokenLog(day_in=10, day_cache_read=1, day_out=20)

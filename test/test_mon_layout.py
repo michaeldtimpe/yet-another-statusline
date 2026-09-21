@@ -371,6 +371,32 @@ class TestAggregateRateLimits:
         # assert
         assert result == expected
 
+    def test_null_rate_limits_returns_none_none(self):
+        # setup
+        sessions = [_make_session(payload={'rate_limits': None})]
+
+        # run
+        result = aggregate_rate_limits(sessions)
+
+        # expected
+        expected = (None, None)
+
+        # assert
+        assert result == expected
+
+    def test_null_bucket_returns_none_none(self):
+        # setup
+        sessions = [_make_session(payload={'rate_limits': {'five_hour': None, 'seven_day': None}})]
+
+        # run
+        result = aggregate_rate_limits(sessions)
+
+        # expected
+        expected = (None, None)
+
+        # assert
+        assert result == expected
+
 
 class TestAggregateDayCost:
     def test_sums_total_cost_across_sessions(self):
@@ -417,3 +443,47 @@ class TestAggregateDayCost:
 
         # assert
         assert result == expected
+
+    def test_null_cost_treated_as_zero(self):
+        # setup
+        sessions = [_make_session(payload={'cost': None})]
+
+        # run
+        result = aggregate_day_cost(sessions)
+
+        # expected
+        expected = 0.0
+
+        # assert
+        assert result == expected
+
+    def test_null_total_cost_usd_treated_as_zero(self):
+        # setup
+        sessions = [_make_session(payload={'cost': {'total_cost_usd': None}})]
+
+        # run
+        result = aggregate_day_cost(sessions)
+
+        # expected
+        expected = 0.0
+
+        # assert
+        assert result == expected
+
+    def test_mix_of_valid_and_null_sessions_sums_only_valid(self):
+        # setup
+        sessions = [
+            _make_session(session_id='a', payload={'cost': {'total_cost_usd': 1.25}}),
+            _make_session(session_id='b', payload={'cost': None}),
+            _make_session(session_id='c', payload={'rate_limits': None}),
+            _make_session(session_id='d', payload={'cost': {'total_cost_usd': 0.50}}),
+        ]
+
+        # run
+        result = aggregate_day_cost(sessions)
+
+        # expected
+        expected = 1.75
+
+        # assert
+        assert abs(result - expected) < 1e-9

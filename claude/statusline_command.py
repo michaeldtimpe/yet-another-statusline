@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -33,19 +33,45 @@ CLAUDE_DARK  = themes.CLAUDE_DARK
 HOME       = Path(os.path.expanduser('~'))
 MIN_WIDTH    = 40
 MAX_WIDTH    = 160
-NARROW_WIDTH = 55
-MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
 
 
-def terminal_width() -> int:
+def _atomic_write(path: Path, text: str) -> None:
+    """Write `text` to `path` so a concurrent reader never sees a partial file.
+
+    Several sessions read-modify-write the shared state files at once; a plain
+    write_text truncates in place, so a reader that lands mid-write gets a
+    half-file (or nothing). Write a sibling temp file — same directory, so
+    os.replace is an atomic rename within one filesystem — and swap it in.
+    Raises OSError on failure, leaving no temp behind, so callers keep their
+    existing best-effort try/except."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f'{path.name}.{os.getpid()}.tmp')
     try:
-        w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
-        if w > 0:
-            return w
-    except (OSError, ValueError):
-        pass
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def terminal_width() -> int:
+    if os.environ.get('TMUX'):
+        try:
+            cmd = ['tmux', 'display-message', '-p']
+            pane = os.environ.get('TMUX_PANE')
+            if pane:
+                cmd += ['-t', pane]
+            cmd.append('#{pane_width}')
+            w = int(subprocess.run(cmd, capture_output=True, text=True, timeout=1).stdout.strip())
+            if w > 0:
+                return w
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
     try:
         w = int((HOME / '.claude' / 'terminal-width').read_text().strip())
         if w > 0:
@@ -95,69 +121,41 @@ def _osascript_width() -> int:
     except (OSError, ValueError):
         pass
     if sys.platform == 'darwin':
-        for script in (
-            'tell application "iTerm2" to tell current session of current window to get columns',
-            'tell application "Terminal" to get number of columns of front window',
-        ):
+        term_program = os.environ.get('TERM_PROGRAM', '')
+        script = None
+        if term_program == 'iTerm.app':
+            script = 'tell application "iTerm2" to tell current session of current window to get columns'
+        elif term_program == 'Apple_Terminal':
+            script = 'tell application "Terminal" to get number of columns of front window'
+        if script is not None:
             try:
                 out = subprocess.run(['osascript', '-e', script],
                                      capture_output=True, text=True, timeout=1)
                 w = int(out.stdout.strip())
             except (OSError, ValueError, subprocess.SubprocessError):
-                continue
+                w = 0
             if w > 0:
                 try:
                     cache.write_text(str(w))
                 except OSError:
                     pass
                 return w
+            try:
+                _atomic_write(cache, str(stale or 0))
+            except OSError:
+                pass
     return stale or 0
 
 RESET  = '\033[0m'
 BOLD   = '\033[1m'
 ITALIC = '\033[3m'
 
-CLR_GREY_DIM   = '\033[38;5;244m'
-CLR_GREY_DARK  = '\033[38;5;238m'
-CLR_BORDER_OFF = '\033[38;5;242m'
 CLR_SKY_BLUE   = '\033[38;5;75m'
 CLR_GREEN_OK   = '\033[38;5;114m'
-CLR_GREEN_DIM  = '\033[38;5;77m'
-CLR_GREEN_BRT  = '\033[38;5;46m'
 CLR_PURPLE     = '\033[38;5;183m'
-CLR_GOLD       = '\033[38;5;222m'
 CLR_YELLOW     = '\033[38;5;226m'
-CLR_YELLOW_BRT = '\033[38;5;11m'
-CLR_CYAN       = '\033[38;5;116m'
-CLR_CYAN_DIM   = '\033[38;5;244m'
-CLR_CYAN_DAY   = '\033[38;5;109m'
-CLR_CYAN_DAY_DIM = '\033[38;5;240m'
-CLR_CYAN_ICON  = '\033[38;5;117m'
-CLR_PINK       = '\033[38;5;210m'
-CLR_PEACH      = '\033[38;5;216m'
-CLR_WHITE_BRT  = '\033[38;5;15m'
 CLR_WARN       = '\033[38;5;214m'
 CLR_ALERT      = '\033[38;5;167m'
-
-# Section markers \u2014 plain text / standard-Unicode only (Monaco-safe; NO Nerd
-# Font Private Use Area glyphs). Kept as named constants so every visible symbol
-# is auditable and future edits can't silently reintroduce PUA drift.
-ICON_COST     = ''         # cost row \u2014 the '$' lives in the formatted figure
-ICON_TOK_RATE = ''         # token-rate \u2014 the 't/m' suffix carries the meaning
-GLYPH_MODEL    = ''        # model row \u2014 the name stands alone
-GLYPH_THINKING = ''        # effort renders as a word (e.g. 'xhigh')
-GLYPH_FAST     = ''        # fast-mode renders via the effort word
-GLYPH_FOLDER   = ''        # path row \u2014 the path stands alone
-GLYPH_SUBAGENT = ''        # (subagent rows removed)
-GLYPH_SUBAGENT_ROW = '>'   # (subagent rows removed; ASCII fallback)
-GLYPH_TASKS    = ''        # (task row removed)
-GLYPH_SKILLS  = 'skills'   # skills label
-GLYPH_PLUGINS = 'plugins'  # plugins label
-GLYPH_HELPER   = '5h'      # five-hour rate-limit label
-GLYPH_TRASH    = '-'       # git deleted count
-GLYPH_RENAMED  = 'R'       # git renamed count
-GLYPH_TOK_IN_ACTIVE  = '\u2193' # token input  (standard arrow; no active/idle split)
-GLYPH_TOK_OUT_ACTIVE = '\u2191' # token output (standard arrow)
 
 def _is_wide(ch: str) -> bool:
     cp = ord(ch)
@@ -218,24 +216,67 @@ def _middle_ellipsis(text: str, max_w: int) -> str:
 
 
 class TokenAccounting:
+    """Per-MTok list prices and the cache multipliers that scale them.
+    Verified against platform.claude.com/docs/en/about-claude/pricing and the
+    prompt-caching page, 2026-09-21."""
+    CACHE_WRITE_5M = 1.25   # a 5-minute-TTL cache write bills at 1.25x input
+    CACHE_WRITE_1H = 2.00   # a 1-hour-TTL cache write bills at 2x input
+
+    @staticmethod
+    def _family_version(m: str, family: str) -> tuple[int | None, int | None]:
+        """(major, minor) for `family` in a normalised name, or None where absent.
+        The version follows the family name in current ids ('opus-4-1') and
+        precedes it in the legacy ones ('claude-3-5-haiku'). A snapshot date
+        ('-20250805') is not a version component, so any run of 3+ digits is
+        ignored."""
+        for pat in (rf'{family}-(\d+)(?:-(\d+))?', rf'(\d+)(?:-(\d+))?-{family}'):
+            mt = re.search(pat, m)
+            if not mt or len(mt.group(1)) > 2:      # no match, or a bare date
+                continue
+            minor = mt.group(2)
+            return int(mt.group(1)), (int(minor) if minor and len(minor) <= 2 else None)
+        return None, None
+
     @staticmethod
     def rates_for(model_name: str) -> tuple[float, float]:
-        m = model_name.lower()
+        """($/MTok input, $/MTok output) for a model id ('claude-opus-4-1-20250805')
+        or a display name ('Opus 4.1'). Both forms normalise to the same shape."""
+        m = re.sub(r'[._ ]', '-', (model_name or '').lower())
+        if 'fable' in m or 'mythos' in m:
+            return 10.00, 50.00
         if 'opus' in m:
-            return 15.00, 75.00
+            major, minor = TokenAccounting._family_version(m, 'opus')
+            # Opus 4 and 4.1 are the older, dearer generation; 4.5+ and 5 are not.
+            if major == 4 and minor in (None, 1):
+                return 15.00, 75.00
+            return 5.00, 25.00
+        if 'sonnet' in m:
+            major, _ = TokenAccounting._family_version(m, 'sonnet')
+            if major is not None and major >= 5:
+                return 2.00, 10.00
+            return 3.00, 15.00          # Sonnet 4.6 and older
         if 'haiku' in m:
-            return 0.80, 4.00
-        return 3.00, 15.00
+            major, _ = TokenAccounting._family_version(m, 'haiku')
+            if major is not None and major <= 3:
+                return 0.80, 4.00       # Haiku 3.5 and older
+            return 1.00, 5.00
+        return 3.00, 15.00              # unknown model: mid-range guess
+
+    @staticmethod
+    def cache_read_mult(model_name: str) -> float:
+        """A cache hit bills at 0.1x the input rate — except Fable/Mythos, 0.025x."""
+        m = (model_name or '').lower()
+        return 0.025 if ('fable' in m or 'mythos' in m) else 0.1
 
     @staticmethod
     def session_cost(model: Model, usage: TranscriptUsage) -> float:
-        rate_in, rate_out = TokenAccounting.rates_for(
-            model.display_name or model.id
-        )
+        name = model.display_name or model.id
+        rate_in, rate_out = TokenAccounting.rates_for(name)
         cost = (
             usage.input_tokens * rate_in
-            + usage.cache_creation_input_tokens * rate_in * 1.25
-            + usage.cache_read_input_tokens * rate_in * 0.1
+            + usage.cache_write_5m * rate_in * TokenAccounting.CACHE_WRITE_5M
+            + usage.cache_write_1h * rate_in * TokenAccounting.CACHE_WRITE_1H
+            + usage.cache_read_input_tokens * rate_in * TokenAccounting.cache_read_mult(name)
             + usage.output_tokens * rate_out
         )
         return cost / 1_000_000
@@ -244,31 +285,31 @@ class TokenAccounting:
     def effective_tokens(model: Model, usage: TranscriptUsage) -> float:
         """Billing-weighted session token total, in input-token-equivalents.
 
-        Each class is scaled by its price relative to the input rate — cache
-        read 0.1x, cache write 1.25x, output rate_out/rate_in — so re-read cache
-        tokens (cheap, and counted every turn) stop dominating the figure. This
-        is exactly `session_cost` divided by the input rate, so it tracks the
-        billed dollars while staying in token units."""
-        rate_in, rate_out = TokenAccounting.rates_for(
-            model.display_name or model.id
-        )
+        Each class is scaled by its price relative to the input rate — a cache
+        write by its TTL (5-minute vs 1-hour), a cache read by the model's hit
+        rate, output by rate_out/rate_in — so re-read cache tokens (cheap, and
+        counted every turn) stop dominating the figure. This is exactly
+        `session_cost` divided by the input rate, so it tracks the billed dollars
+        while staying in token units."""
+        name = model.display_name or model.id
+        rate_in, rate_out = TokenAccounting.rates_for(name)
         if rate_in <= 0:
             return 0.0
         return (
             usage.input_tokens
-            + usage.cache_creation_input_tokens * 1.25
-            + usage.cache_read_input_tokens * 0.1
+            + usage.cache_write_5m * TokenAccounting.CACHE_WRITE_5M
+            + usage.cache_write_1h * TokenAccounting.CACHE_WRITE_1H
+            + usage.cache_read_input_tokens * TokenAccounting.cache_read_mult(name)
             + usage.output_tokens * (rate_out / rate_in)
         )
 
     @staticmethod
     def day_cost(model: Model, token_log: TokenLog) -> float:
-        rate_in, rate_out = TokenAccounting.rates_for(
-            model.display_name or model.id
-        )
+        name = model.display_name or model.id
+        rate_in, rate_out = TokenAccounting.rates_for(name)
         cost = (
             token_log.day_in * rate_in
-            + token_log.day_cache_read * rate_in * 0.1
+            + token_log.day_cache_read * rate_in * TokenAccounting.cache_read_mult(name)
             + token_log.day_out * rate_out
         )
         return cost / 1_000_000
@@ -448,7 +489,7 @@ class BillingCache:
     TTL  = 1800.0   # seconds; an active plan session refreshes this every render
 
     @classmethod
-    def resolve(cls, session_id: str, rl: RateLimits) -> RateLimits:
+    def resolve(cls, session_id: str, rl: RateLimits, write: bool = True) -> RateLimits:
         """Return `rl` when it carries data (and persist it); otherwise fall back
         to cached buckets so a null frame doesn't flip the billing mode. This
         covers two gaps: a transient null refresh mid-session, AND a brand-new
@@ -487,12 +528,13 @@ class BillingCache:
             pass
 
         if rl.is_live():
+            if not write:                     # replay/observer render: never re-stamp
+                return rl
             fh, sd = rl.five_hour, rl.seven_day
             others.append(f'{now:.0f} {session_id} {fh.used_percentage} '
                           f'{fh.resets_at} {sd.used_percentage} {sd.resets_at}')
             try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('\n'.join(others) + '\n')
+                _atomic_write(path, '\n'.join(others) + '\n')
             except OSError:
                 pass
             return rl
@@ -551,7 +593,7 @@ class SessionInfo:
     def short_pwd(self) -> str:
         home = str(HOME)
         p = self.cwd
-        if p.startswith(home):
+        if p == home or p.startswith(home + '/'):
             p = '~' + p[len(home):]
         parts = p.split('/')
         last = len(parts) - 1
@@ -601,24 +643,56 @@ def effective_session_cost(session: SessionInfo, usage: TranscriptUsage) -> floa
 
 @dataclass
 class TokenLog:
+    KEEP_DAYS = 7   # rows older than this are dropped on the next rewrite
+
     day_in: int = 0
     day_cache_read: int = 0
     day_out: int = 0
 
     @classmethod
+    def _prune(cls, lines: list[str], today: str) -> list[str]:
+        """Keep only rows dated within KEEP_DAYS of `today`. The log holds one row
+        per session forever otherwise, and is rewritten in full every render.
+        Rows with an unparseable date are junk and go too. Uses `date` rather
+        than `datetime`, which tests freeze."""
+        try:
+            cutoff = date.fromisoformat(today)
+        except ValueError:
+            return lines
+        kept = []
+        for ln in lines:
+            parts = ln.split()
+            if not parts:
+                continue
+            try:
+                day = date.fromisoformat(parts[0])
+            except ValueError:
+                continue
+            if (cutoff - day).days > cls.KEEP_DAYS:
+                continue
+            kept.append(ln)
+        return kept
+
+    @classmethod
     def update(cls, session_id: str, today: str, total_in: int, cache_read: int, total_out: int) -> TokenLog:
         log = HOME / '.claude' / 'statusline-tokens.log'
         lines = []
-        if log.exists():
-            for ln in log.read_text().splitlines():
-                parts = ln.split()
-                if len(parts) >= 2 and parts[1] == session_id:
-                    continue
-                lines.append(ln)
+        try:
+            existing = log.read_text().splitlines() if log.exists() else []
+        except OSError:                       # unreadable log degrades to "no log"
+            existing = []
+        for ln in existing:
+            parts = ln.split()
+            if len(parts) >= 2 and parts[1] == session_id:
+                continue
+            lines.append(ln)
+        lines = cls._prune(lines, today)
         if session_id and (total_in > 0 or cache_read > 0 or total_out > 0):
             lines.append(f'{today} {session_id} {total_in} {cache_read} {total_out}')
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text('\n'.join(lines) + '\n')
+            try:
+                _atomic_write(log, '\n'.join(lines) + '\n')
+            except OSError:
+                pass
         day_in = day_cache_read = day_out = 0
         for ln in lines:
             parts = ln.split()
@@ -641,37 +715,51 @@ class TokenLog:
 
 
 
+def _env_seconds(name: str, default: float) -> float:
+    """Env-tunable window; a malformed or non-positive value falls back rather
+    than raising at import time and taking the whole statusline down."""
+    try:
+        v = float(os.environ.get(name, '') or default)
+    except ValueError:
+        return default
+    return v if v > 0 else default
+
+
 class TokenRate:
-    WINDOW = float(os.environ.get('STATUSLINE_TOKEN_WINDOW', '60'))
+    WINDOW = _env_seconds('STATUSLINE_TOKEN_WINDOW', 60.0)
     KEEP = 300.0
 
     @classmethod
-    def update(cls, session_id: str, total_in: int, total_out: int) -> int:
+    def update(cls, session_id: str, total_in: int, total_out: int, record: bool = True) -> int:
         if not session_id:
             return 0
         log = HOME / '.claude' / 'statusline-token-rate.log'
         now = time.time()
         rows: list[tuple[float, str, int, int]] = []
-        if log.exists():
-            for ln in log.read_text().splitlines():
-                parts = ln.split()
-                if len(parts) < 4:
-                    continue
-                try:
-                    ts = float(parts[0])
-                    ti = int(parts[2])
-                    to = int(parts[3])
-                except ValueError:
-                    continue
-                if now - ts > cls.KEEP:
-                    continue
-                rows.append((ts, parts[1], ti, to))
-        rows.append((now, session_id, total_in, total_out))
         try:
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text('\n'.join(f'{ts:.3f} {sid} {ti} {to}' for ts, sid, ti, to in rows) + '\n')
+            log_text = log.read_text() if log.exists() else ''
         except OSError:
-            pass
+            log_text = ''
+        for ln in log_text.splitlines():
+            parts = ln.split()
+            if len(parts) < 4:
+                continue
+            try:
+                ts = float(parts[0])
+                ti = int(parts[2])
+                to = int(parts[3])
+            except ValueError:
+                continue
+            if now - ts > cls.KEEP:
+                continue
+            rows.append((ts, parts[1], ti, to))
+        if record:
+            rows.append((now, session_id, total_in, total_out))
+            try:
+                _atomic_write(log, '\n'.join(f'{ts:.3f} {sid} {ti} {to}'
+                                             for ts, sid, ti, to in rows) + '\n')
+            except OSError:
+                pass
         samples = [(ts, ti, to) for ts, sid, ti, to in rows if sid == session_id and now - ts <= cls.WINDOW]
         if len(samples) < 2:
             return 0
@@ -679,73 +767,6 @@ class TokenRate:
         _, ti0, to0 = samples[0]
         _, ti1, to1 = samples[-1]
         return max(0, (ti1 + to1) - (ti0 + to0))
-
-    @classmethod
-    def history(cls, session_id: str, n_buckets: int, window: float) -> list[int]:
-        if n_buckets <= 0 or not session_id:
-            return []
-        log = HOME / '.claude' / 'statusline-token-rate.log'
-        now = time.time()
-        samples: list[tuple[float, int, int]] = []
-        if log.exists():
-            for ln in log.read_text().splitlines():
-                parts = ln.split()
-                if len(parts) < 4:
-                    continue
-                try:
-                    ts = float(parts[0])
-                    sid = parts[1]
-                    ti = int(parts[2])
-                    to = int(parts[3])
-                except ValueError:
-                    continue
-                if sid == session_id and now - ts <= window + window / n_buckets:
-                    samples.append((ts, ti, to))
-        if len(samples) < 2:
-            return [0] * n_buckets
-        samples.sort()
-        bucket_size = window / n_buckets
-        last_bucket  = int(now // bucket_size)
-        first_bucket = last_bucket - n_buckets + 1
-        buckets = [0] * n_buckets
-        for i in range(len(samples) - 1):
-            ts0, ti0, to0 = samples[i]
-            ts1, ti1, to1 = samples[i + 1]
-            delta = max(0, (ti1 + to1) - (ti0 + to0))
-            if delta == 0:
-                continue
-            midpoint = (ts0 + ts1) / 2
-            abs_bucket = int(midpoint // bucket_size)
-            if first_bucket <= abs_bucket <= last_bucket:
-                buckets[abs_bucket - first_bucket] += delta
-        return buckets
-
-    @classmethod
-    def recently_active(cls, session_id: str, window: float = 10.0) -> tuple[bool, bool]:
-        """Return (in_active, out_active) — True if that count grew in the last `window` seconds."""
-        if not session_id:
-            return False, False
-        log = HOME / '.claude' / 'statusline-token-rate.log'
-        if not log.exists():
-            return False, False
-        now = time.time()
-        samples: list[tuple[float, int, int]] = []
-        for ln in log.read_text().splitlines():
-            parts = ln.split()
-            if len(parts) < 4:
-                continue
-            try:
-                ts, sid, ti, to = float(parts[0]), parts[1], int(parts[2]), int(parts[3])
-            except ValueError:
-                continue
-            if sid == session_id and now - ts <= window:
-                samples.append((ts, ti, to))
-        if len(samples) < 2:
-            return False, False
-        samples.sort()
-        ti0, to0 = samples[0][1], samples[0][2]
-        ti1, to1 = samples[-1][1], samples[-1][2]
-        return ti1 > ti0, to1 > to0
 
 
 @dataclass
@@ -783,12 +804,61 @@ class GitInfo:
     def _find_repo(cwd: str) -> tuple[str, str]:
         curr = Path(cwd) if cwd else None
         while curr:
-            if (curr / '.git').exists():
-                return str(curr), str(curr / '.git')
+            dot = curr / '.git'
+            if dot.exists():
+                # worktrees/submodules: .git is a file holding 'gitdir: <path>'
+                return str(curr), (GitInfo._gitdir_from_file(dot) if dot.is_file() else str(dot))
             if curr == curr.parent:
                 break
             curr = curr.parent
         return '', ''
+
+    @staticmethod
+    def _gitdir_from_file(dot: Path) -> str:
+        try:
+            text = dot.read_text().strip()
+        except OSError:
+            return str(dot)
+        if not text.startswith('gitdir:'):
+            return str(dot)
+        target = Path(text[len('gitdir:'):].strip())
+        if not target.is_absolute():
+            target = dot.parent / target      # pointer is relative to the .git file
+        return str(target)
+
+    @staticmethod
+    def _common_dir(gitdir: str) -> Path:
+        """Linked worktrees keep HEAD locally but refs in the common dir."""
+        base = Path(gitdir)
+        link = base / 'commondir'
+        if not link.is_file():
+            return base
+        try:
+            target = Path(link.read_text().strip())
+        except OSError:
+            return base
+        return target if target.is_absolute() else base / target
+
+    @staticmethod
+    def _resolve_ref(gitdir: str, ref: str) -> str:
+        common = GitInfo._common_dir(gitdir)
+        loose = common / ref
+        if loose.is_file():
+            try:
+                return loose.read_text().strip()
+            except OSError:
+                return ''
+        try:
+            lines = (common / 'packed-refs').read_text().splitlines()
+        except OSError:
+            return ''
+        for line in lines:
+            if not line or line[0] in '#^':
+                continue
+            sha, _, name = line.partition(' ')
+            if name.strip() == ref:
+                return sha.strip()
+        return ''
 
     @staticmethod
     def _read_head(gitdir: str) -> tuple[str, str]:
@@ -801,26 +871,15 @@ class GitInfo:
             head = head_path.read_text().strip()
         except OSError:
             return '', ''
-        branch = ''
+        branch, ref = '', ''
         if head.startswith('ref:'):
-            branch = head.rsplit('/', 1)[-1]
+            ref = head[4:].strip()            # 'refs/heads/feature/foo'
+            branch = (ref[len('refs/heads/'):] if ref.startswith('refs/heads/')
+                      else ref.rsplit('/', 1)[-1])
         elif head:
             branch = f'd:{head[:7]}'
-        commit = ''
-        if branch and not branch.startswith('d:'):
-            ref = Path(gitdir) / 'refs' / 'heads' / branch
-            if ref.is_file():
-                try:
-                    commit = ref.read_text().strip()[:9]
-                except OSError:
-                    pass
-        if not commit:
-            orig = Path(gitdir) / 'ORIG_HEAD'
-            if orig.is_file():
-                try:
-                    commit = orig.read_text().strip()[:9]
-                except OSError:
-                    pass
+        # no ORIG_HEAD fallback: that is the pre-reset commit, i.e. the wrong sha
+        commit = GitInfo._resolve_ref(gitdir, ref)[:9] if ref else ''
         return branch, commit
 
     @staticmethod
@@ -881,6 +940,10 @@ class TranscriptUsage:
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
     output_tokens: int = 0
+    # The 1-hour-TTL subset of cache_creation_input_tokens (bills at 2x, not
+    # 1.25x). Older transcripts carry no TTL split, so the default of 0 reads
+    # as "all 5-minute".
+    cache_creation_1h_input_tokens: int = 0
 
     @classmethod
     def from_transcript(cls, transcript_path: str) -> TranscriptUsage:
@@ -890,7 +953,7 @@ class TranscriptUsage:
         if not p.is_file():
             return cls()
         seen: set[str] = set()
-        ti = cc = cr = to = 0
+        ti = cc = cr = to = c1h = 0
         try:
             with p.open('r', errors='ignore') as fh:
                 for ln in fh:
@@ -910,18 +973,32 @@ class TranscriptUsage:
                     cc += u.get('cache_creation_input_tokens', 0) or 0
                     cr += u.get('cache_read_input_tokens', 0) or 0
                     to += u.get('output_tokens', 0) or 0
+                    # TTL split; absent/null on older transcripts → all 5-minute
+                    cc_ttl = u.get('cache_creation') or {}
+                    if isinstance(cc_ttl, dict):
+                        c1h += cc_ttl.get('ephemeral_1h_input_tokens', 0) or 0
         except OSError:
             return cls()
         return cls(
-            input_tokens                = ti,
-            cache_creation_input_tokens = cc,
-            cache_read_input_tokens     = cr,
-            output_tokens               = to,
+            input_tokens                   = ti,
+            cache_creation_input_tokens    = cc,
+            cache_read_input_tokens        = cr,
+            output_tokens                  = to,
+            cache_creation_1h_input_tokens = min(c1h, cc),   # never exceed the aggregate
         )
 
     @property
     def billed_in(self) -> int:
         return self.input_tokens + self.cache_creation_input_tokens
+
+    @property
+    def cache_write_1h(self) -> int:
+        """1-hour-TTL cache writes, clamped into the aggregate."""
+        return max(0, min(self.cache_creation_1h_input_tokens, self.cache_creation_input_tokens))
+
+    @property
+    def cache_write_5m(self) -> int:
+        return max(0, self.cache_creation_input_tokens - self.cache_write_1h)
 
     @property
     def cache_read(self) -> int:
@@ -1004,33 +1081,6 @@ class Renderer:
         self.spec_empty_ansi = t.spec_empty_ansi
 
     R         = RESET
-    BORDER    = CLR_GREY_DIM
-    PWD       = CLR_SKY_BLUE
-    BRANCH    = CLR_GREEN_OK
-    COMMIT    = CLR_GREY_DIM
-    SESSION   = CLR_GREY_DIM
-    MODEL     = CLR_PURPLE
-    SKILLS    = CLR_GOLD
-    TIME      = CLR_GREY_DIM
-    TOK       = CLR_CYAN
-    TOK_DIM   = CLR_CYAN_DIM
-    TOK_DAY     = CLR_CYAN_DAY
-    TOK_DAY_DIM = CLR_CYAN_DAY_DIM
-    COST      = CLR_PINK
-    BAR_FILL  = CLR_GREEN_OK
-    BAR_EMPTY = CLR_GREY_DARK
-    DIM_GREEN = CLR_GREEN_DIM
-    LABEL     = CLR_GREY_DIM
-    CTX       = CLR_PEACH
-    BOLDW     = BOLD + CLR_WHITE_BRT
-    BOLDY     = CLR_YELLOW
-    DIRTY     = CLR_WARN
-    ICON_PATH = CLR_CYAN_ICON
-    ARROW     = CLR_GREEN_BRT
-    TOK_ICON  = CLR_YELLOW_BRT
-    OPUS      = CLR_YELLOW
-    SONNET    = CLR_GREEN_OK
-    HAIKU     = CLR_SKY_BLUE
 
     def model_colour(self, model_name: str) -> str:
         return self.theme.models[model_key(model_name)].label
@@ -1096,10 +1146,13 @@ def _session_start(transcript_path: str) -> float | None:
     return None
 
 
-def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
-    """Single borderless line of ` · `-separated segments. Low-value segments drop
-    first when the line exceeds `width`; the full path is truncated only after that
-    (keeping git/ctx/model); the model is pinned last.
+def render_lines(session: SessionInfo, width: int, r: Renderer, record: bool = True) -> list[str]:
+    """Single borderless line of ` · `-separated segments. The path shrinks first
+    (smart middle-ellipsis) to free room; only once it's at its floor and the line
+    still overflows does the fit loop start dropping segments, highest-priority-
+    number first — that can eventually drop any segment, including git/ctx/model,
+    not just the low-value trivia/limit ones; the model is pinned last in the
+    join order.
 
         <min-path> · <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
           · ctx % used/size · tkn <billed-weighted> · cch N · <rate>/m
@@ -1123,9 +1176,12 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     git   = GitInfo.from_cwd(session.cwd)
     usage = TranscriptUsage.from_transcript(session.transcript_path)
     today = datetime.now().strftime('%Y-%m-%d')
-    TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
-    tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out)
-    rate_limits = BillingCache.resolve(session.session_id, session.rate_limits)
+    # record=False (mon.py re-rendering an old payload every 2s): read-only —
+    # no log row, no rate sample, no re-stamped billing cache.
+    if record:
+        TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
+    tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out, record=record)
+    rate_limits = BillingCache.resolve(session.session_id, session.rate_limits, write=record)
     five, seven = rate_limits.five_hour, rate_limits.seven_day
 
     # Minimized home-relative path: intermediate dirs collapse to their first
@@ -1173,14 +1229,17 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
     cache_seg = f'{r.LABEL}cch {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
     rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
-    # billing-weighted session token total, in input-token-equivalents: each
-    # class scaled by its price (cache read 0.1x, cache write 1.25x, output 5x),
-    # so re-read cache tokens don't dominate. Tracks the billed cost in token units.
+    # billing-weighted session token total, in input-token-equivalents: each class
+    # scaled by its price relative to input — cache writes by TTL (5m vs 1h), cache
+    # reads by the model's hit rate, output by rate_out/rate_in — so re-read cache
+    # tokens don't dominate. Tracks the billed cost in token units.
     eff_tok   = TokenAccounting.effective_tokens(session.model, usage)
     total_seg = f'{r.LABEL}tkn {r.TOK}{fmt_tok(round(eff_tok))}{r.R}'
 
-    # Segments after the path, each (text, drop_priority). Priorities 1–3 are kept
-    # (path truncates instead); ≥4 are dropped first (trivia/limits).
+    # Segments after the path, each (text, drop_priority). The fit loop below
+    # drops the highest-priority-number segment first once the path is at its
+    # floor and the line still overflows; that can eventually drop ANY segment,
+    # including git/ctx/model — priority only controls drop order, not exemption.
     segs: list[tuple[str, int]] = []
     if git_seg:
         segs.append((git_seg, 1))
@@ -1248,12 +1307,15 @@ def render_lines(session: SessionInfo, width: int, r: Renderer) -> list[str]:
     return [line]
 
 
-def render(session_info: dict, width: int, *, bg_shift: str = 'warm', theme: Theme | None = None) -> str:
+def render(session_info: dict, width: int, *, bg_shift: str = 'warm',
+           theme: Theme | None = None, record: bool = True) -> str:
+    """`record=False` renders without touching any state file — for replaying a
+    stored payload (mon.py) instead of a live frame."""
     if width < MIN_WIDTH:
         return ''
     session = SessionInfo.from_dict(session_info)
     r       = Renderer(bg_shift=bg_shift, theme=theme)
-    return '\n'.join(render_lines(session, width, r))
+    return '\n'.join(render_lines(session, width, r, record=record))
 
 
 def prune_output_dir(out_dir: Path, keep: int = 50) -> None:
@@ -1270,6 +1332,21 @@ def prune_output_dir(out_dir: Path, keep: int = 50) -> None:
             stale.unlink()
         except OSError:
             pass
+
+
+def write_payload_snapshot(info: dict, out_dir: Path) -> None:
+    """One snapshot per session, overwritten in place: two sessions rendering in
+    the same second used to collide on a timestamped name, and the count-based
+    prune let a busy session evict a quiet one out of mon.py's view. The id is
+    sanitized because it lands in a filename. Best-effort."""
+    sid = re.sub(r'[^A-Za-z0-9._-]', '_', str(info.get('session_id') or ''))
+    if not sid:
+        return
+    try:
+        _atomic_write(out_dir / f'statusline.{sid}.json', json.dumps(info))
+        prune_output_dir(out_dir)             # also retires legacy timestamped files
+    except OSError:
+        pass
 
 
 def main() -> None:
@@ -1291,17 +1368,16 @@ def main() -> None:
         elif a.startswith('--theme='):
             theme_name = a.split('=', 1)[1]
 
-    info  = json.loads(sys.stdin.read())
+    try:
+        info = json.loads(sys.stdin.read())
+    except (OSError, ValueError):             # empty or malformed stdin: say nothing
+        return
+    if not isinstance(info, dict):
+        return
     theme = resolve_theme(theme_name)
 
     # Write payload so the multi-session observer can index it.
-    try:
-        out_dir = HOME / '.claude' / 'statusline-output'
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f'statusline.{int(time.time())}.json').write_text(json.dumps(info))
-        prune_output_dir(out_dir)
-    except OSError:
-        pass
+    write_payload_snapshot(info, HOME / '.claude' / 'statusline-output')
 
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
