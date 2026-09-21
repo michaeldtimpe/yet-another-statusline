@@ -832,9 +832,14 @@ class GitInfo:
             return none
         try:
             r = subprocess.run(
-                ['git', '-C', repo, 'status', '--porcelain=v1', '-b', '-z',
-                 '--untracked-files=normal'],
-                capture_output=True, text=True, timeout=2,
+                ['git', '--no-optional-locks', '-C', repo, 'status',
+                 '--porcelain=v1', '-b', '-z', '--untracked-files=normal'],
+                capture_output=True, text=True, timeout=5,
+                # --no-optional-locks: never take .git/index.lock for a read-only
+                # status poll. Without it, a timeout kill mid-refresh strands a
+                # zero-byte index.lock and every later commit fails until it is
+                # removed by hand. Bites hardest on network shares (SMB), where
+                # status can take >1s on a repo of any size.
             )
         except Exception:
             return none
