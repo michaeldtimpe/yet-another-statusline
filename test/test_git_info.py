@@ -102,3 +102,94 @@ def test_from_cwd_real_repo(tmp_path: Path) -> None:
     result = sl.GitInfo.from_cwd(str(tmp_path))
     assert result.modified == 1
     assert result.untracked == 1
+
+
+
+requires_git = pytest.mark.skipif(shutil.which('git') is None, reason='git not installed')
+
+
+def _git(repo: Path, *args: str) -> str:
+    """Run git in repo with a fixed identity; return stdout stripped."""
+    r = subprocess.run(
+        ['git', '-c', 'user.email=a@b', '-c', 'user.name=t', '-C', str(repo), *args],
+        check=True, capture_output=True, text=True,
+    )
+    return r.stdout.strip()
+
+
+def _scratch_repo(base: Path, branch: str = 'main') -> Path:
+    """Create a real repo at base with one empty commit on branch."""
+    base.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['git', 'init', '-q', '-b', branch, str(base)], check=True, capture_output=True)
+    _git(base, 'commit', '-q', '--allow-empty', '-m', 'init')
+    return base
+
+
+@requires_git
+def test_read_head_slashed_branch(tmp_path: Path) -> None:
+    """A branch with a slash keeps its full name and resolves HEAD's own sha."""
+    repo = _scratch_repo(tmp_path / 'r')
+    _git(repo, 'checkout', '-q', '-b', 'feature/foo')
+    _git(repo, 'commit', '-q', '--allow-empty', '-m', 'second')
+
+    branch, commit = sl.GitInfo._read_head(str(repo / '.git'))
+    assert branch == 'feature/foo'
+    assert commit == _git(repo, 'rev-parse', 'HEAD')[:9]
+
+
+@requires_git
+def test_read_head_ignores_orig_head_after_reset(tmp_path: Path) -> None:
+    """After a hard reset the sha is HEAD's, never the ORIG_HEAD leftover."""
+    repo = _scratch_repo(tmp_path / 'r')
+    _git(repo, 'checkout', '-q', '-b', 'feature/foo')
+    _git(repo, 'commit', '-q', '--allow-empty', '-m', 'second')
+    _git(repo, 'reset', '-q', '--hard', 'HEAD~1')
+
+    head = _git(repo, 'rev-parse', 'HEAD')
+    orig = _git(repo, 'rev-parse', 'ORIG_HEAD')
+    assert head != orig
+
+    branch, commit = sl.GitInfo._read_head(str(repo / '.git'))
+    assert branch == 'feature/foo'
+    assert commit == head[:9]
+    assert commit != orig[:9]
+
+
+@requires_git
+def test_read_head_packed_refs(tmp_path: Path) -> None:
+    """With the loose ref packed away the sha still comes from packed-refs."""
+    repo = _scratch_repo(tmp_path / 'r')
+    _git(repo, 'checkout', '-q', '-b', 'feature/foo')
+    _git(repo, 'commit', '-q', '--allow-empty', '-m', 'second')
+    head = _git(repo, 'rev-parse', 'HEAD')
+    _git(repo, 'pack-refs', '--all')
+    assert not (repo / '.git' / 'refs' / 'heads' / 'feature' / 'foo').exists()
+
+    branch, commit = sl.GitInfo._read_head(str(repo / '.git'))
+    assert branch == 'feature/foo'
+    assert commit == head[:9]
+
+
+@requires_git
+def test_from_cwd_linked_worktree(tmp_path: Path) -> None:
+    """A linked worktree (.git is a file) reports its own branch and sha."""
+    repo = _scratch_repo(tmp_path / 'r')
+    wt = tmp_path / 'wt'
+    _git(repo, 'worktree', 'add', '-q', str(wt), '-b', 'wtbranch')
+    assert (wt / '.git').is_file()
+
+    result = sl.GitInfo.from_cwd(str(wt))
+    assert result.branch == 'wtbranch'
+    assert result.commit == _git(wt, 'rev-parse', 'HEAD')[:9]
+    assert not result.detached
+
+
+@requires_git
+def test_from_cwd_detached_head(tmp_path: Path) -> None:
+    """A detached HEAD is still flagged detached and shows the short sha."""
+    repo = _scratch_repo(tmp_path / 'r')
+    _git(repo, 'checkout', '-q', '--detach')
+
+    result = sl.GitInfo.from_cwd(str(repo))
+    assert result.detached
+    assert result.branch == _git(repo, 'rev-parse', 'HEAD')[:7]

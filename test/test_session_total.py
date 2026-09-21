@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import statusline_command as sl
 
 _EXAMPLE = Path(__file__).resolve().parent.parent / 'claude' / 'statusline' / 'session-info-example.json'
@@ -36,7 +38,7 @@ def test_effective_tokens_tracks_session_cost_over_input_rate():
     rate_in, _ = sl.TokenAccounting.rates_for(model.display_name)
     eff  = sl.TokenAccounting.effective_tokens(model, usage)
     cost = sl.TokenAccounting.session_cost(model, usage)
-    assert eff == cost * 1_000_000 / rate_in
+    assert eff == pytest.approx(cost * 1_000_000 / rate_in)
 
 
 def test_session_total_segment_shows_effective_tokens(monkeypatch, tmp_home, strip_ansi):

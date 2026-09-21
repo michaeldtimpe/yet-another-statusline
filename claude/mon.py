@@ -8,7 +8,6 @@ import select
 import shutil
 import signal
 import sys
-import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -33,8 +32,17 @@ from mon.tui import parse_args, enter_alt_screen, exit_alt_screen
 from statusline_command import render, resolve_theme, MIN_WIDTH
 
 _CURSOR_HOME = '\x1b[H'
+_ERASE_LINE  = '\x1b[K'
+_ERASE_SCREEN_DOWN = '\x1b[J'
 _DIM  = '\033[38;5;240m'
 _RESET = '\033[0m'
+
+
+def _write_frame(frame: str) -> None:
+    """Write frame at cursor-home, erasing stale content on every line and below."""
+    cleared = '\n'.join(line + _ERASE_LINE for line in frame.split('\n'))
+    sys.stdout.write(_CURSOR_HOME + cleared + _ERASE_SCREEN_DOWN)
+    sys.stdout.flush()
 
 
 def _fmt_age(secs: int) -> str:
@@ -79,29 +87,29 @@ def tick(args) -> None:
         body   = format_narrow_body(cols, available_body)
         footer = format_footer(0, 0, 0, cols)
         frame  = '\n'.join([header, body, footer])
-        sys.stdout.write(_CURSOR_HOME + frame)
-        sys.stdout.flush()
+        _write_frame(frame)
         return
 
     # Render each session box; prepend an age label; apply dim post-processing.
     width = max(MIN_WIDTH, min(160, cols - 6))
-    rendered_boxes: list[str] = []
+    pairs: list[tuple] = []
     for s, tier in active:
-        box = render(s.payload, width, bg_shift=args.bg_shift, theme=theme)
+        box = render(s.payload, width, bg_shift=args.bg_shift, theme=theme, record=False)
         if box:
             age_secs = max(0, int(now_ts - s.jsonl_mtime))
             label = _age_label(age_secs, width)
             box = label + '\n' + box
             if tier == 'dim':
                 box = apply_dim(box)
-            rendered_boxes.append(box)
+            pairs.append((s, box))
 
     # Clip to available body height.
+    rendered_boxes = [box for _, box in pairs]
     visible_boxes, hidden_count = clip_to_height(rendered_boxes, available_body)
     n_sessions = len(visible_boxes)
 
-    # Aggregate header data.
-    visible_sessions = [s for (s, _), box in zip(active, rendered_boxes) if box in visible_boxes]
+    # Aggregate header data (same surviving prefix as visible_boxes).
+    visible_sessions = [s for s, _ in pairs[:len(visible_boxes)]]
     five_h, seven_d = aggregate_rate_limits(visible_sessions)
     day_cost        = aggregate_day_cost(visible_sessions)
 
@@ -114,8 +122,7 @@ def tick(args) -> None:
     else:
         frame = '\n'.join([header] + visible_boxes + [footer])
 
-    sys.stdout.write(_CURSOR_HOME + frame)
-    sys.stdout.flush()
+    _write_frame(frame)
 
 
 def main() -> None:

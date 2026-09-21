@@ -153,9 +153,9 @@ def aggregate_rate_limits(
     if not sessions:
         return (None, None)
     latest = max(sessions, key=lambda s: s.payload_mtime)
-    rl = latest.payload.get('rate_limits', {})
-    five_h  = rl.get('five_hour',  {}).get('used_percentage')
-    seven_d = rl.get('seven_day',  {}).get('used_percentage')
+    rl = latest.payload.get('rate_limits') or {}
+    five_h  = (rl.get('five_hour')  or {}).get('used_percentage')
+    seven_d = (rl.get('seven_day')  or {}).get('used_percentage')
     try:
         five_h  = int(five_h)  if five_h  is not None else None
     except (TypeError, ValueError):
@@ -169,7 +169,10 @@ def aggregate_rate_limits(
 
 def aggregate_day_cost(sessions: list[ActiveSession]) -> float:
     """Sum total_cost_usd across all sessions."""
-    return sum(
-        s.payload.get('cost', {}).get('total_cost_usd', 0.0)
-        for s in sessions
-    )
+    total = 0.0
+    for s in sessions:
+        cost = s.payload.get('cost') or {}
+        value = cost.get('total_cost_usd', 0.0)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            total += value
+    return total

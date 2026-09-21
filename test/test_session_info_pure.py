@@ -27,6 +27,13 @@ class TestShortPwd:
         info = sl.SessionInfo(cwd='/')
         assert info.short_pwd == '/'
 
+    def test_sibling_dir_not_tilde_abbreviated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # '/Users/alice2' starts with home '/Users/alice' as a
+        # plain string prefix but is a sibling directory, not a subpath.
+        monkeypatch.setattr(sl, 'HOME', Path('/Users/alice'))
+        info = sl.SessionInfo(cwd='/Users/alice2/proj/x')
+        assert info.short_pwd == '/U/a/p/x'
+
 
 
 class TestModelName:

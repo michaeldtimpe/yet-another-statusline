@@ -1,7 +1,7 @@
 STATUSLINE_SRC := $(CURDIR)/claude/statusline_command.py
 THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
 MON_SRC        := $(CURDIR)/claude/mon.py
-INSTALL_DIR	   := $(HOME)/.claude
+INSTALL_DIR    := $(HOME)/.claude
 
 install:
 	@mkdir -p "$(INSTALL_DIR)/statusline"
@@ -29,7 +29,7 @@ demo/img:
 	@python3 claude/statusline/demo.py --snapshots demo/
 
 mon/install:
-	@for dir in $(INSTALL_DIRS); do \
+	@for dir in $(INSTALL_DIR); do \
 		if ! test -d "$$dir"; then \
 			echo "directory $$dir does not exist, skipping"; \
 			continue; \
