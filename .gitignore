@@ -6,4 +6,3 @@ demo/
 
 # Local gitkit tooling artifacts (survey notes, plans, reports)
 .luxe/
-.claude/snapctx/
