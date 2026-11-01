@@ -6,14 +6,16 @@ shows your working directory, git state, context usage, plan quotas (or API
 spend), and session timing on one line that adapts to the terminal width.
 
 ```
-~/D/yet-another-statusline · main/90db263 ✓ · ctx 84% 844.1K/1.0M · tkn 16.4M · cch 157.6M · 18.0K/m · T-1:05 20% · 7d 32% · plan · start +3 · last 13:14 · Opus 4.7 1M xhigh
+~/D/yet-another-statusline · main/90db263 ✓ · ctx 84% 844.1K/1.0M · tkn 16.4M · cch 157.6M · 7d T-53h 32% · start +3 · last 13:14 · Opus 4.7 1M xhigh
 ```
 
-On metered API billing there are no plan quotas, so the `5h/7d/plan` trio is
-replaced by the session spend (colored by amount) tagged `api`:
+The quota segment doubles as the billing-mode signal. On a plan you see the
+quota windows with their reset countdowns (the 5-hour window only on plans that
+still have one; Max/Ultra show just `7d`). On metered API billing there are no
+plan quotas, so they are replaced by the session spend (colored by amount):
 
 ```
-~/D/yet-another-statusline · main/90db263 ✓ · ctx 84% 844.1K/1.0M · tkn 16.4M · cch 157.6M · 18.0K/m · cost $42.18 · api · start +3 · last 13:14 · Opus 4.7 1M xhigh
+~/D/yet-another-statusline · main/90db263 ✓ · ctx 84% 844.1K/1.0M · tkn 16.4M · cch 157.6M · cost $42.18 · start +3 · last 13:14 · Opus 4.7 1M xhigh
 ```
 
 > Personal fork of [tmck-code/yet-another-statusline](https://github.com/tmck-code/yet-another-statusline),
@@ -71,7 +73,7 @@ Segments are separated by ` · `. The **path is always minimized** (intermediate
 directories collapse to their first letter, the project name stays full) so the
 data segments keep horizontal room. As the terminal narrows the path shrinks
 further (smart middle-ellipsis); only once the path is at its floor do the
-lowest-value segments drop (rate → cch → timestamp → plan/quota → tkn). The
+lowest-value segments drop (cch → timestamp → plan/quota → tkn). The
 branch, `ctx`, and the model are protected, and the model is pinned last.
 
 | Segment | Meaning |
@@ -84,12 +86,9 @@ branch, `ctx`, and the model are protected, and the model is pinned last.
 | `ctx N% used/size` | context-window occupancy (compaction risk); the `%` is Claude Code's own `used_percentage`, so it matches the context warning Claude Code shows on the right of this row |
 | `tkn N` | session tokens, **billing-weighted** (cache read 0.1×, cache write 1.25×, output 5×) and in input-token-equivalents, so repeated cache re-reads don't dominate; tracks billed cost in token units |
 | `cch N` | cumulative cache-read tokens this session (raw count — much larger than `tkn` because re-reads are counted every turn) |
-| `N/m` | token throughput per minute |
-| `T-H:MM N%` | rolling 5-hour plan quota: time to reset (countdown leads) + % used (subscription only) |
-| `7d N%` | rolling weekly plan quota (subscription only) |
-| `plan` | you're on a subscription (so cost is notional and not shown) |
-| `cost $N` | **API billing only** — session spend, replacing the `5h/7d/plan` trio; colored 🟢 under $50 · 🟡 $50–99 · 🔴 $100+ |
-| `api` | you're on metered API/console billing (so `cost` is real spend) |
+| `T-<H>h N%` | rolling 5-hour plan quota: whole hours to reset (countdown leads) + % used (subscription only; omitted when Claude Code sends no `five_hour` bucket, as on Max/Ultra) |
+| `7d T-<H>h N%` | rolling weekly plan quota: whole hours to reset + % used (subscription only; `T-<1h` in the final hour) |
+| `cost $N` | **API billing only** — real session spend, replacing the quota windows; colored 🟢 under $50 · 🟡 $50–99 · 🔴 $100+ |
 | `start +N · last HH:MM` | days since the session opened (`+0` same day, `+1` after 24h, `+2` after 48h, …) and last refresh (this render's clock time) |
 | `Opus 4.7 1M xhigh` | model + thinking effort (pinned last) |
 
@@ -102,9 +101,9 @@ re-renders on activity, so a stale time means the session has been idle.
 > rate-limit windows, but it intermittently emits a `null` frame — including at the
 > very start of a new session, before the windows are fetched. So the last live
 > windows are cached (per machine, 30-min TTL) and reused across those gaps; a fresh
-> session borrows the most recent windows from any session so it shows `plan`
-> immediately instead of flashing `api`. A genuine API account never sends windows,
-> so it caches nothing and correctly stays `api`.
+> session borrows the most recent windows from any session so it shows the quotas
+> immediately instead of flashing `cost`. A genuine API account never sends windows,
+> so it caches nothing and correctly stays on `cost`.
 
 > **No duplicate context %.** When you're near the limit, Claude Code shows its
 > own *"N% context used"* warning on the right side of this same row — that's

@@ -80,3 +80,9 @@ def test_session_info_recursive_population() -> None:
     )
     assert result.rate_limits.five_hour == sl.RateBucket(used_percentage=33.0, resets_at=1700000001)
     assert result.rate_limits.seven_day == sl.RateBucket(used_percentage=10.5, resets_at=1700000002)
+
+
+def test_rate_limits_tracks_five_hour_presence() -> None:
+    assert sl.RateLimits.from_dict({'five_hour': {'used_percentage': 1}}).has_five_hour
+    assert not sl.RateLimits.from_dict({'seven_day': {'used_percentage': 1}}).has_five_hour
+    assert not sl.RateLimits.from_dict({'five_hour': None}).has_five_hour

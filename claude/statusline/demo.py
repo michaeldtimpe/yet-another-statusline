@@ -262,7 +262,7 @@ def mutate_session_info(tmpdir: Path, session_id: str, raw: dict) -> str:
     )
     resets = int(time.time()) + 7200
     raw.setdefault('rate_limits', {}).setdefault('five_hour', {})['resets_at'] = resets
-    raw['rate_limits'].setdefault('seven_day', {})['resets_at'] = resets
+    raw['rate_limits'].setdefault('seven_day', {})['resets_at'] = resets + 2 * 86400 + 5 * 3600
     raw['thinking'] = {'enabled': True}
     raw['effort'] = {'level': 'high'}
     return json.dumps(raw)
@@ -578,7 +578,7 @@ def render_scenario(
     raw['context_window']['total_output_tokens'] = total_out
     resets = int(time.time()) + 7200
     raw.setdefault('rate_limits', {}).setdefault('five_hour', {})['resets_at']        = resets
-    raw['rate_limits'].setdefault('seven_day', {})['resets_at']                        = resets
+    raw['rate_limits'].setdefault('seven_day', {})['resets_at']                        = resets + 2 * 86400 + 5 * 3600
     raw['rate_limits']['five_hour']['used_percentage'] = cfg.five_hour_pct
     raw['rate_limits']['seven_day']['used_percentage'] = cfg.seven_day_pct
 

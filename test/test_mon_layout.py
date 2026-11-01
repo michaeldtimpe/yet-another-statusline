@@ -81,7 +81,7 @@ class TestFormatHeader:
         # assert
         assert _vw(result) == expected
 
-    def test_none_percentages_show_placeholder(self):
+    def test_none_percentages_show_placeholder_and_omit_5h(self):
         # setup
         width = 80
 
@@ -97,8 +97,9 @@ class TestFormatHeader:
         # expected
         plain = strip_ansi(result)
 
-        # assert
-        assert plain.count('–') == 2
+        # assert: 7d gets a placeholder; a missing 5h window is omitted outright
+        assert plain.count('–') == 1
+        assert '5h' not in plain
 
     def test_zero_sessions_shows_all_placeholders(self):
         # setup
@@ -118,10 +119,10 @@ class TestFormatHeader:
 
         # assert
         assert '0 sessions' in plain
-        assert '5h:' in plain
+        assert '5h:' not in plain     # no 5h window -> field omitted, not '–'
         assert '7d:' in plain
         assert 'day: $0.00' in plain
-        assert plain.count('–') == 2
+        assert plain.count('–') == 1
 
 
 class TestFormatFooter:

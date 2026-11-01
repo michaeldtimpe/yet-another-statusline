@@ -9,8 +9,8 @@ segments built by `render_lines()` (no box frame, no wasted space):
 
 ```
 <min-path> · <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓ · ctx % used/size
-  · tkn <billed-weighted> · cch N · <rate>/m · T-H:MM 5h% · 7d % · plan · start +<days-ago> · last <refresh> · <model> <effort>
-  (API billing instead: · cost $<session-cost> · api  — replaces the 5h/7d/plan trio)
+  · tkn <billed-weighted> · cch N · [T-<H>h 5h%] · 7d T-<H>h % · start +<days-ago> · last <refresh> · <model> <effort>
+  (API billing instead: · cost $<session-cost>  — replaces the 5h/7d quota windows)
 ```
 
 Field meanings: **min-path** = the working directory, home-relative (`~/…`),
@@ -30,11 +30,13 @@ class for this session weighted by its billing rate (cache write 1.25× or 2×
 by TTL, cache read 0.1× — 0.025× on Fable/Mythos —, output `rate_out/rate_in`)
 and expressed in input-token-equivalents, so repeated
 cache re-reads don't dominate; **cch** = cumulative cache-read
-tokens for the session; **<rate>/m** = token throughput per minute; **5h/7d** =
-rolling plan quotas with time-to-reset; **plan** = on a subscription (cost is
-notional, so not shown). On **metered API/console billing** there are no 5h/7d
-windows, so that whole trio is replaced by **cost $<session-cost>** (the session
-spend, preferring the payload's `cost.total_cost_usd`) tagged **api**; the dollar
+tokens for the session; **5h/7d** =
+rolling plan quotas with time-to-reset (5h appears only when the payload
+carries a `five_hour` bucket; Max/Ultra plans have none). The quota windows are
+themselves the plan signal (no separate tag; cost is notional, so not shown). On
+**metered API/console billing** there are no 5h/7d windows, so they are replaced
+by **cost $<session-cost>** (the session spend, preferring the payload's
+`cost.total_cost_usd`), which on its own signals API mode; the dollar
 figure is colour-reactive — green under $50, yellow $50–99, red $100+;
 **`start +<days-ago> · last <refresh>`** = the count of full 24h periods since
 the session began (`+0` same day, `+1` after 24h, `+2` after 48h, …) and the
@@ -44,7 +46,7 @@ dropped.
 
 It is **responsive**: the path is always minimized up front, and shrinks further
 (smart middle-ellipsis) to keep the data segments; only when the path hits its
-floor do the lowest-value segments drop (rate → cch → timestamp → plan/quota → tkn);
+floor do the lowest-value segments drop (cch → timestamp → plan/quota → tkn);
 the branch/`ctx`/model are protected and the model stays pinned last. Terminal
 width: Claude Code provides no TTY/`COLUMNS`, so width falls back to an
 AppleScript query of iTerm2/Terminal (cached ~5s in `~/.claude/.statusline-width`);
@@ -77,10 +79,10 @@ The persisted sums (`day_in`, `day_cache_read`, `day_out`) of **Billed Input**, 
 **Effective Session Tokens**:
 A single billing-weighted token figure for the *current* session, rendered as the `tkn <count>` segment. Each token class is scaled by its price relative to the input rate — **Cache Read** 0.1× (0.025× on Fable/Mythos), a cache write by its TTL (1.25× for the 5-minute default, 2× for a 1-hour write), **Output** `rate_out/rate_in` (5× on most models) — and the result is expressed in **input-token-equivalents**. This is exactly **Session Cost** divided by the input rate, so it tracks billed dollars while staying in token units. Computed by `TokenAccounting.effective_tokens`.
 _Why weighted, not raw_: a raw sum is dominated by **Cache Read**, which is re-counted on every turn (the same cached context, re-read), so a brand-new session would read as 1M+ even though almost nothing fresh was billed. Weighting collapses those re-reads to their true cache-hit cost.
-_Avoid_: presenting it as a literal count of tokens the model processed — it is a price-weighted equivalent, not a wire-level token count. Drives no colour. Drops before the protected branch/`ctx`/`model` segments but survives longer than `cch`, `<rate>/m`, the rate-limit quotas, and the timestamp.
+_Avoid_: presenting it as a literal count of tokens the model processed — it is a price-weighted equivalent, not a wire-level token count. Drives no colour. Drops before the protected branch/`ctx`/`model` segments but survives longer than `cch`, the rate-limit quotas, and the timestamp.
 
 **Session Cost**:
-The session's billed cost. Taken **authoritatively** from the payload's `cost.total_cost_usd` (what Claude Code actually billed). Only when that field is absent (older Claude Code) does the statusline fall back to a token×list-rate **estimate** (`effective_session_cost`). A present `0.0` is honoured, not treated as absent. Rendered as the `cost $<n>` segment, but only under **API billing marker** — a plan session doesn't show it (see **Plan marker**).
+The session's billed cost. Taken **authoritatively** from the payload's `cost.total_cost_usd` (what Claude Code actually billed). Only when that field is absent (older Claude Code) does the statusline fall back to a token×list-rate **estimate** (`effective_session_cost`). A present `0.0` is honoured, not treated as absent. Rendered as the `cost $<n>` segment, but only in **API billing mode** — a plan session doesn't show it (see **Plan mode**).
 
 **Day Cost**:
 A rate-card **estimate** of today's spend, computed from **Day Total** × list rates (`TokenAccounting.day_cost`) — *not* an authoritative figure. It is necessarily approximate: the day log stores **Billed Input** as one combined number (`input + cache_creation`), so neither cache-write premium (1.25× or 2×, depending on TTL) can be split back out. Not shown in the per-session `statusline_command.py` line at all — it's aggregated across sessions and rendered in `claude/mon.py`'s header row (`day: $<n>`, via `aggregate_day_cost`/`format_header` in `claude/mon/layout.py`).
@@ -120,16 +122,16 @@ _Avoid_: "palette" as a synonym (a palette is a *source* — Catppuccin Latte, S
 ### Rate limits
 
 **Five-Hour Limit**:
-The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Rendered countdown-first as `T-<time-to-reset> <pct>%` — the time-to-refresh is the signal, so it leads and the `5h` label is dropped. Only when no `resets_at` is available (no countdown to imply the bucket) does it fall back to the labelled `5h <pct>%` form.
+The rolling 5-hour quota Anthropic publishes in `rate_limits.five_hour`. Rendered countdown-first as `T-<H>h <pct>%` (whole hours, see Seven-Day Limit) — the time-to-refresh is the signal, so it leads and the `5h` label is dropped. Only when no `resets_at` is available (no countdown to imply the bucket) does it fall back to the labelled `5h <pct>%` form. **Omitted entirely** when the payload has no `five_hour` bucket (Max/Ultra plans no longer have a 5-hour window; Claude Code sends only `seven_day`). Presence is tracked by `RateLimits.has_five_hour`, and `BillingCache` records an absent bucket as `-` so a cached row never resurrects it as `0%`.
 
 **Seven-Day Limit**:
-The weekly quota in `rate_limits.seven_day`. Shown in the model row after the Five-Hour Limit as `7d <pct>%`.
+The weekly quota in `rate_limits.seven_day`. Rendered after the Five-Hour Limit as `7d T-<countdown> <pct>%`: the `7d` label stays (a second bare countdown would be ambiguous next to the 5h one), and the countdown is whole hours rounded down (`T-30h`), `T-<1h` in the final hour; no minutes or day units (`_fmt_reset`). Falls back to `7d <pct>%` without a `resets_at`. On Max/Ultra it is the only quota shown.
 
-**Plan marker**:
-A `plan` tag rendered next to the rate-limit quotas whenever any quota is present (subscription plans expose `rate_limits`; metered API/console use does not). It signals that **Session Cost** is the *notional* API-equivalent figure Claude Code reports, not incremental spend.
+**Plan mode**:
+Signalled by the rate-limit quota segments themselves whenever any quota is present (subscription plans expose `rate_limits`; metered API/console use does not). There is no separate `plan` tag (dropped 2026-11-01 as redundant with the quotas). In this mode **Session Cost** is the *notional* API-equivalent figure Claude Code reports, not incremental spend, so it is not shown.
 
-**API billing marker**:
-When no quota is present (metered API/console use exposes no `rate_limits`), the 5h/7d/`plan` trio is meaningless and is replaced by **cost $<session-cost>** + an `api` tag. The cost prefers the payload's authoritative `cost.total_cost_usd` and falls back to the token×rate estimate (`effective_session_cost`). Here the dollar figure is *real billed spend*, the inverse of the `plan` case where cost is notional, so it is **colour-reactive** as a spend warning: green under $50, yellow $50–99, red $100 and above.
+**API billing mode**:
+When no quota is present (metered API/console use exposes no `rate_limits`), the 5h/7d windows are meaningless and are replaced by **cost $<session-cost>**, which on its own signals the mode (the `api` tag was dropped as redundant). The cost prefers the payload's authoritative `cost.total_cost_usd` and falls back to the token×rate estimate (`effective_session_cost`). Here the dollar figure is *real billed spend*, the inverse of plan mode, where cost is notional, so it is **colour-reactive** as a spend warning: green under $50, yellow $50–99, red $100 and above.
 
 ## Relationships
 

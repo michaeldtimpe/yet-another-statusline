@@ -50,15 +50,17 @@ def format_header(
     """Return a single ANSI-decorated header line padded/clipped to width."""
     sep = f'{_DIM} · {_RESET}'
 
-    five_h_str  = f'{_BRIGHT}{five_h_pct}%{_RESET}'  if five_h_pct  is not None else f'{_DIM}–{_RESET}'
+    # No 5h value = no 5-hour window (Max/Ultra omit it) -> leave the field out
+    # rather than show a placeholder for a limit that doesn't exist.
+    five_h_part = (f'{_DIM}5h: {_RESET}{_BRIGHT}{five_h_pct}%{_RESET}{sep}'
+                   if five_h_pct is not None else '')
     seven_d_str = f'{_BRIGHT}{seven_d_pct}%{_RESET}' if seven_d_pct is not None else f'{_DIM}–{_RESET}'
 
     line = (
         f'{_BRIGHT}{n_sessions}{_RESET}'
         f'{_DIM} session{"s" if n_sessions != 1 else ""}{_RESET}'
         f'{sep}'
-        f'{_DIM}5h: {_RESET}{five_h_str}'
-        f'{sep}'
+        f'{five_h_part}'
         f'{_DIM}7d: {_RESET}{seven_d_str}'
         f'{sep}'
         f'{_DIM}day: {_RESET}{_BRIGHT}${day_cost_usd:.2f}{_RESET}'

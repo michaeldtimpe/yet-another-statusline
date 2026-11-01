@@ -35,7 +35,7 @@ def test_no_pua_or_legacy_glyphs_any_theme_any_width(monkeypatch, tmp_path) -> N
 
 def test_render_old_payload_without_cost_or_rate_limits(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     # Backward compat: an older Claude Code payload missing cost/rate_limits/
-    # thinking must still render (estimate cost fallback, no plan tag, no crash).
+    # thinking must still render (estimate cost fallback, cost view, no crash).
     (tmp_path / '.claude').mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(sl, 'HOME', tmp_path)
     old = {
@@ -49,4 +49,4 @@ def test_render_old_payload_without_cost_or_rate_limits(monkeypatch, tmp_path) -
     }
     out = sl.render(old, 120)
     assert out and not _unsafe(ANSI.sub('', out))
-    assert 'plan' not in ANSI.sub('', out)  # no rate_limits => not flagged as plan
+    assert 'cost $' in ANSI.sub('', out)  # no rate_limits => API cost view, not quotas

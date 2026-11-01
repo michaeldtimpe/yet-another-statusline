@@ -462,12 +462,18 @@ class ContextWindow:
 class RateLimits:
     five_hour: RateBucket = field(default_factory=RateBucket)
     seven_day: RateBucket = field(default_factory=RateBucket)
+    # Whether the payload actually carried a `five_hour` bucket. Max/Ultra plans
+    # no longer have a 5-hour window and Claude Code omits the bucket entirely;
+    # without this flag the empty default would render as a fake `5h 0%`.
+    has_five_hour: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> RateLimits:
+        fh = d.get('five_hour')
         return cls(
-            five_hour = RateBucket.from_dict(d.get('five_hour')  or {}),
-            seven_day = RateBucket.from_dict(d.get('seven_day') or {}),
+            five_hour     = RateBucket.from_dict(fh or {}),
+            seven_day     = RateBucket.from_dict(d.get('seven_day') or {}),
+            has_five_hour = isinstance(fh, dict),
         )
 
     def is_live(self) -> bool:
@@ -482,10 +488,10 @@ class BillingCache:
     """Plan vs API billing is inferred from whether a payload carries
     `rate_limits`. Claude Code intermittently emits a frame with `rate_limits`
     null (e.g. a refresh that fires before the window data is fetched), which
-    momentarily flips a plan user to `api`. Remember the last live buckets per
+    momentarily flips a plan user to the API `cost` view. Remember the last live buckets per
     session and reuse them across these gaps so the mode — and the displayed
     countdown/percentages — stay stable. A genuine API session never carries
-    rate-limit data, so nothing is ever cached and it correctly stays `api`."""
+    rate-limit data, so nothing is ever cached and it correctly stays on `cost`."""
     TTL  = 1800.0   # seconds; an active plan session refreshes this every render
 
     @classmethod
@@ -497,7 +503,7 @@ class BillingCache:
         the latter has no row of its own yet, so it borrows the most recent live
         row from any session. The 5h/7d windows are account-global, so another
         recent session's buckets are accurate. A genuine API account never writes
-        a row at all, so it correctly stays `api`."""
+        a row at all, so it correctly stays on `cost`."""
         if not session_id:
             return rl
         # Computed at call time (not a class attribute) so tests monkeypatching
@@ -531,8 +537,11 @@ class BillingCache:
             if not write:                     # replay/observer render: never re-stamp
                 return rl
             fh, sd = rl.five_hour, rl.seven_day
-            others.append(f'{now:.0f} {session_id} {fh.used_percentage} '
-                          f'{fh.resets_at} {sd.used_percentage} {sd.resets_at}')
+            # `-` marks an absent 5h bucket so a cached row can't resurrect it.
+            fh_pct, fh_rst = ((fh.used_percentage, fh.resets_at) if rl.has_five_hour
+                              else ('-', '-'))
+            others.append(f'{now:.0f} {session_id} {fh_pct} '
+                          f'{fh_rst} {sd.used_percentage} {sd.resets_at}')
             try:
                 _atomic_write(path, '\n'.join(others) + '\n')
             except OSError:
@@ -544,9 +553,12 @@ class BillingCache:
         row = cached or best_other
         if row:
             try:
+                has_fh = row[2] != '-'
                 return RateLimits(
-                    five_hour = RateBucket(used_percentage=float(row[2]), resets_at=int(row[3])),
-                    seven_day = RateBucket(used_percentage=float(row[4]), resets_at=int(row[5])),
+                    five_hour     = (RateBucket(used_percentage=float(row[2]), resets_at=int(row[3]))
+                                     if has_fh else RateBucket()),
+                    seven_day     = RateBucket(used_percentage=float(row[4]), resets_at=int(row[5])),
+                    has_five_hour = has_fh,
                 )
             except ValueError:
                 pass
@@ -1110,14 +1122,16 @@ def resolve_theme(cli_name: str | None) -> Theme:
 
 
 def _fmt_reset(resets_at: float) -> str:
-    """'T-H:MM' until a rate-limit window resets, or '' if unknown/past."""
+    """Countdown until a rate-limit window resets, or '' if unknown/past.
+    Whole hours, rounded down ('T-30h'); minutes are noise at this scale.
+    Under an hour reads 'T-<1h' rather than a misleading 'T-0h'."""
     if not resets_at:
         return ''
     delta = resets_at - time.time()
     if delta <= 0:
         return ''
-    h, m = int(delta // 3600), int((delta % 3600) // 60)
-    return f'T-{h}:{m:02d}'
+    h = int(delta // 3600)
+    return f'T-{h}h' if h else 'T-<1h'
 
 
 def _session_start(transcript_path: str) -> float | None:
@@ -1155,9 +1169,10 @@ def render_lines(session: SessionInfo, width: int, r: Renderer, record: bool = T
     join order.
 
         <min-path> · <branch>/<commit> +U ~M -D ↑ahead ↓behind ✓
-          · ctx % used/size · tkn <billed-weighted> · cch N · <rate>/m
-          · T-H:MM 5h% · 7d % · plan          (subscription)
-          · cost $<session-cost> · api         (API billing — replaces 5h/7d;
+          · ctx % used/size · tkn <billed-weighted> · cch N
+          · [T-<H>h 5h%] · 7d T-<H>h %         (subscription; 5h only when the
+                                                 payload carries a five_hour bucket)
+          · cost $<session-cost>               (API billing — replaces 5h/7d;
                                                  spend colour: green<50 yellow<100 red)
           · start +<days-ago> · last <refresh> · <model> <effort>
 
@@ -1180,7 +1195,9 @@ def render_lines(session: SessionInfo, width: int, r: Renderer, record: bool = T
     # no log row, no rate sample, no re-stamped billing cache.
     if record:
         TokenLog.update(session.session_id, today, usage.billed_in, usage.cache_read, usage.out)
-    tok_rate    = TokenRate.update(session.session_id, usage.billed_in, usage.out, record=record)
+    # Not displayed (the `/m` segment was dropped); still sampled so
+    # statusline-token-viewer.py keeps its data.
+    TokenRate.update(session.session_id, usage.billed_in, usage.out, record=record)
     rate_limits = BillingCache.resolve(session.session_id, session.rate_limits, write=record)
     five, seven = rate_limits.five_hour, rate_limits.seven_day
 
@@ -1228,7 +1245,6 @@ def render_lines(session: SessionInfo, width: int, r: Renderer, record: bool = T
     ctx_seg = (f'{r.LABEL}ctx {ctx_clr}{ctx_pct:.0f}%{r.R} '
                f'{r.CTX}{fmt_tok(total)}{r.LABEL}/{fmt_tok(size)}{r.R}')
     cache_seg = f'{r.LABEL}cch {r.TOK_DIM}{fmt_tok(usage.cache_read)}{r.R}'
-    rate_seg  = f'{r.TOK_ICON}{fmt_tok(tok_rate)}{r.R}{r.LABEL}/m{r.R}'
     # billing-weighted session token total, in input-token-equivalents: each class
     # scaled by its price relative to input — cache writes by TTL (5m vs 1h), cache
     # reads by the model's hit rate, output by rate_out/rate_in — so re-read cache
@@ -1246,29 +1262,36 @@ def render_lines(session: SessionInfo, width: int, r: Renderer, record: bool = T
     segs.append((ctx_seg, 2))
     segs.append((total_seg, 4))
     segs.append((cache_seg, 8))
-    segs.append((rate_seg, 9))
     # Billing mode. Subscription plans report 5h/7d rate-limit windows; API
-    # billing does not. When on a plan, show the limit windows + a `plan` tag.
-    # When on API, those windows are meaningless — replace them with the
-    # estimated session cost and tag it `api` so the mode is unambiguous.
+    # billing does not. The segment itself is the mode signal — quota windows
+    # with countdowns mean plan, a `cost $` figure means API — so there is no
+    # separate `plan`/`api` tag repeating it.
     on_plan = rate_limits.is_live()
     if on_plan:
         reset    = _fmt_reset(five.resets_at)
         five_pct = f'{r.fill_colour(float(five.used_percentage or 0))}{int(five.used_percentage or 0)}%{r.R}'
-        # Lead with the countdown (T-H:MM) — the time-to-refresh is the signal;
+        # Lead with the countdown (T-<H>h) — the time-to-refresh is the signal;
         # the `5h` label is only needed when there's no countdown to imply it.
         if reset:
             five_seg = f'{r.COMMIT}{reset}{r.R} {five_pct}'
         else:
             five_seg = f'{r.LABEL}5h {five_pct}'
-        seven_seg = f'{r.LABEL}7d {r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
-        segs += [(five_seg, 4), (seven_seg, 5), (f'{r.LABEL}plan{r.R}', 6)]
+        seven_pct = f'{r.fill_colour(float(seven.used_percentage or 0))}{int(seven.used_percentage or 0)}%{r.R}'
+        # 7d keeps its label (a bare second countdown would be ambiguous next
+        # to the 5h one) and, like 5h, puts the countdown before the percentage.
+        seven_reset = _fmt_reset(seven.resets_at)
+        seven_seg = (f'{r.LABEL}7d {r.COMMIT}{seven_reset}{r.R} {seven_pct}' if seven_reset
+                     else f'{r.LABEL}7d {seven_pct}')
+        # Max/Ultra plans have no 5-hour window; Claude Code omits the bucket, so
+        # only show 5h when it's actually present (never a synthesized 0%).
+        if rate_limits.has_five_hour:
+            segs.append((five_seg, 4))
+        segs.append((seven_seg, 5))
     else:
         cost = effective_session_cost(session, usage)
         # Reactive spend colour: green ≤ $49, yellow $50–99, red ≥ $100.
         cost_clr = r.safe if cost < 50 else (r.warn if cost < 100 else r.alert)
-        segs += [(f'{r.LABEL}cost {cost_clr}${cost:.2f}{r.R}', 5),
-                 (f'{r.LABEL}api{r.R}', 6)]
+        segs.append((f'{r.LABEL}cost {cost_clr}${cost:.2f}{r.R}', 5))
     now_str = datetime.now().strftime('%H:%M')
     start   = _session_start(session.transcript_path)
     if start:
